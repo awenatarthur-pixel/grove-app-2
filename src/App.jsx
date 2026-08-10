@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { useAuth } from "./useAuth";
+import AuthPanel from "./AuthPanel";
 import {
   ListChecks, Trees, BarChart2, Plus, Lock, X, Check, Flame,
   Sparkles, Heart, ShoppingBag, Trophy, UserPlus, Flower2, Crown,
@@ -1979,7 +1981,7 @@ function StatsPage({ state, actions }) {
             borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
             color: "var(--bark-900)", fontWeight: 600,
           }}>
-            🐲 Invite sent — you earned a friendly dragon and {state.freeProDays > 0 ? `${state.freeProDays} free Pro days` : "a bonus"}!
+            🐲 Invite sent — you earned a friendly dragon and Grove Pro!
           </div>
         )}
 
@@ -2200,11 +2202,15 @@ function PlansPage({ state, actions }) {
     <div style={{ paddingBottom: 100 }}>
       <TopBar title="Plans" right={<SparksPill sparks={state.sparks} />} />
 
+      <div style={{ padding: "0 20px" }}>
+        <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+      </div>
+
       <SectionLabel label="Grove Pro" icon={<Crown size={14} />} sub={state.pro ? `You're on the ${state.proPlan || "monthly"} plan` : "Unlimited habits, journal, AI coach & more"} />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10, alignItems: "start" }}>
         {PRO_PLANS.map(p => {
           const isLifetime = p.id === "lifetime";
-          const disabled = isLifetime && lifetimeExpired;
+          const disabled = (isLifetime && lifetimeExpired) || !state.authUser;
           const active = state.pro && state.proPlan === p.id;
           return (
             <div key={p.id} style={{
@@ -2234,15 +2240,19 @@ function PlansPage({ state, actions }) {
                 )}
               </div>
               <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 17, color: "var(--forest-900)", flexShrink: 0 }}>{p.price}</div>
-              <button onClick={() => actions.subscribeToPlan(p.id)} disabled={disabled} style={{
+              <button onClick={() => actions.startCheckout(p.id)} disabled={disabled} style={{
                 padding: "8px 12px", borderRadius: 10, border: "none", cursor: disabled ? "default" : "pointer",
-                background: active ? "var(--moss-600)" : "var(--forest-900)", color: active ? "#fff" : "var(--gold-500)",
+                background: active ? "var(--moss-600)" : disabled ? "var(--parchment-100)" : "var(--forest-900)",
+                color: active ? "#fff" : disabled ? "var(--bark-700)" : "var(--gold-500)",
                 fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, flexShrink: 0,
-              }}>{active ? "Active" : disabled ? "Expired" : "Choose"}</button>
+                opacity: disabled && !active ? 0.7 : 1,
+              }}>{active ? "Active" : isLifetime && lifetimeExpired ? "Expired" : "Choose"}</button>
             </div>
           );
         })}
-        <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center" }}>Demo only — no real payment is processed.</p>
+        <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center" }}>
+          {state.authUser ? "Secure checkout via Stripe." : "Sign in above to subscribe."}
+        </p>
       </div>
 
       <SectionLabel label="Buy Sparks" icon={<Sparkles size={14} />} sub="Top up your Sparks balance for shiny skins and the AI Adviser" />
@@ -2435,6 +2445,7 @@ function TabBar({ page, setPage }) {
 ------------------------------------------------------------------------- */
 export default function GroveApp() {
   useFonts();
+  const auth = useAuth();
   const [showQuoteOfDay, setShowQuoteOfDay] = useState(true);
   const [page, setPage] = useState("tracker");
   const [detailHabitId, setDetailHabitId] = useState(null);
@@ -2446,7 +2457,6 @@ export default function GroveApp() {
   const [sparks, setSparks] = useState(0);
   const [shinyUnlocked, setShinyUnlocked] = useState([]);
   const [shinyHidden, setShinyHidden] = useState([]);
-  const [freeProDays, setFreeProDays] = useState(0);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -2474,6 +2484,16 @@ export default function GroveApp() {
   ]);
   const [saveLoaded, setSaveLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error' | null
+
+  // If we've just come back from a successful Stripe checkout, refresh the
+  // user's Pro status from the database and clean the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") === "success") {
+      auth.refreshProfile();
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [auth.user]);
 
   // Load any previously saved progress once, on first mount.
   useEffect(() => {
@@ -2503,7 +2523,6 @@ export default function GroveApp() {
         if (data.sparks !== undefined) setSparks(data.sparks);
         if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
         if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
-        if (data.freeProDays !== undefined) setFreeProDays(data.freeProDays);
         if (data.bonusDone !== undefined) setBonusDone(data.bonusDone);
         if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
         if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
@@ -2534,7 +2553,7 @@ export default function GroveApp() {
   useEffect(() => {
     if (!saveLoaded) return;
     const payload = {
-      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, freeProDays, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
+      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
       feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
       environment, sharedUpdates, plannerItems, placedItems,
     };
@@ -2549,7 +2568,7 @@ export default function GroveApp() {
     }, 500); // debounce so rapid changes (like dragging) don't spam saves
     return () => clearTimeout(t);
   }, [
-    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, freeProDays, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
+    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
     environment, sharedUpdates, plannerItems, placedItems,
   ]);
@@ -2596,7 +2615,6 @@ export default function GroveApp() {
     setShinyUnlocked([]);
     setShinyHidden([]);
     setLastSparkDate(null);
-    setFreeProDays(0);
     setDetailHabitId(null);
     setPage("tracker");
     if (creatorMode) { setPro(true); setPoints(99999); } else { setPro(false); setPoints(70); }
@@ -2763,8 +2781,8 @@ export default function GroveApp() {
     },
     inviteFriend: () => {
       setFlowers(f => f + 1);
-      setFreeProDays(d => Math.min(14, d + 7));
       setPro(true);
+      if (auth.user) auth.grantFreePro();
     },
     subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); },
     shareProgress: (text) => {
@@ -2850,6 +2868,24 @@ export default function GroveApp() {
       setPro(true);
       setProPlan(planId);
     },
+    startCheckout: async (planId) => {
+      if (!auth.user) return;
+      try {
+        const res = await fetch("/api/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId, userId: auth.user.id, email: auth.user.email }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          alert(data.error || "Something went wrong starting checkout — please try again.");
+        }
+      } catch (err) {
+        alert("Couldn't reach the server. Please check your connection and try again.");
+      }
+    },
     cancelPro: () => {
       setPro(false);
       setProPlan(null);
@@ -2864,6 +2900,8 @@ export default function GroveApp() {
     refundSparks: (amount) => {
       setSparks(s => s + amount);
     },
+    signInWithEmail: (email) => auth.signInWithEmail(email),
+    signOut: () => auth.signOut(),
   };
 
   const positiveDerived = positive.map(h => ({
@@ -2872,12 +2910,18 @@ export default function GroveApp() {
     streak: currentStreak(h.history),
   }));
 
+  // Once signed in, real Pro status comes from the database (set by the Stripe webhook)
+  // rather than the local demo toggle. Creator Mode always overrides, for testing.
+  const effectivePro = creatorMode ? true : (auth.user && auth.profile ? auth.profile.pro : pro);
+  const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : proPlan;
+
   const state = {
-    page, pro, points, flowers, sparks, shinyUnlocked, shinyHidden, freeProDays, positive: positiveDerived, negative: negativeDerived, friends,
+    page, pro: effectivePro, points, flowers, sparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
     unlocked, hiddenFeatureIds, unlockedEnvs, environment, placedItems, fogLevel,
     sharedUpdates, plannerItems,
     showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled,
-    lifetimeOfferExpiresAt, proPlan,
+    lifetimeOfferExpiresAt, proPlan: effectiveProPlan,
+    authUser: auth.user, authLoading: auth.loading,
   };
 
   const detailHabit = positiveDerived.find(h => h.id === detailHabitId);
