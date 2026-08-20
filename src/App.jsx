@@ -2204,6 +2204,14 @@ function PlansPage({ state, actions }) {
 
       <div style={{ padding: "0 20px" }}>
         <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+        {state.authUser && state.hasStripeCustomer && (
+          <button onClick={actions.manageSubscription} style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            padding: "10px 14px", borderRadius: 12, border: "1.5px solid var(--parchment-100)", cursor: "pointer",
+            background: "transparent", color: "var(--bark-700)",
+            fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, marginBottom: 10,
+          }}>Manage subscription</button>
+        )}
       </div>
 
       <SectionLabel label="Grove Pro" icon={<Crown size={14} />} sub={state.pro ? `You're on the ${state.proPlan || "monthly"} plan` : "Unlimited habits, journal, AI coach & more"} />
@@ -2886,6 +2894,27 @@ export default function GroveApp() {
         alert("Couldn't reach the server. Please check your connection and try again.");
       }
     },
+    manageSubscription: async () => {
+      if (!auth.user || !auth.profile?.stripe_customer_id) {
+        alert("No subscription found for this account yet.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/create-portal-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customerId: auth.profile.stripe_customer_id }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          alert(data.error || "Couldn't open subscription management — please try again.");
+        }
+      } catch (err) {
+        alert("Couldn't reach the server. Please check your connection and try again.");
+      }
+    },
     cancelPro: () => {
       setPro(false);
       setProPlan(null);
@@ -2921,7 +2950,7 @@ export default function GroveApp() {
     sharedUpdates, plannerItems,
     showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled,
     lifetimeOfferExpiresAt, proPlan: effectiveProPlan,
-    authUser: auth.user, authLoading: auth.loading,
+    authUser: auth.user, authLoading: auth.loading, hasStripeCustomer: !!auth.profile?.stripe_customer_id,
   };
 
   const detailHabit = positiveDerived.find(h => h.id === detailHabitId);

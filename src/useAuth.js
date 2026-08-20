@@ -13,7 +13,7 @@ export function useAuth() {
     if (!userId) { setProfile(null); return; }
     const { data, error } = await supabase
       .from('profiles')
-      .select('pro, pro_plan')
+      .select('pro, pro_plan, stripe_customer_id')
       .eq('id', userId)
       .single();
     if (!error) setProfile(data);
@@ -45,6 +45,14 @@ export function useAuth() {
  
   const signOut = () => supabase.auth.signOut();
  
+  // Used for perks like "invite a friend" that should grant real Pro status
+  // to a signed-in user, not just a local demo flag.
+  const grantFreePro = async () => {
+    if (!session?.user) return;
+    const { error } = await supabase.from('profiles').update({ pro: true }).eq('id', session.user.id);
+    if (!error) fetchProfile(session.user.id);
+  };
+ 
   return {
     session,
     user: session?.user ?? null,
@@ -52,6 +60,7 @@ export function useAuth() {
     loading,
     signInWithEmail,
     signOut,
+    grantFreePro,
     refreshProfile: () => session?.user && fetchProfile(session.user.id),
   };
 }
