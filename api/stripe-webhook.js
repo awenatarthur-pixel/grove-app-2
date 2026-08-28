@@ -40,9 +40,27 @@ export default async function handler(req, res) {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const userId = session.client_reference_id;
-      const planId = session.metadata?.planId;
+      const purchaseType = session.metadata?.purchaseType;
 
-      if (userId) {
+      if (userId && purchaseType === 'sparks') {
+        // Sparks bundle — add to the existing balance, don't overwrite it
+        const sparkAmount = parseInt(session.metadata?.sparkAmount || '0', 10);
+        const { data: profile, error: fetchErr } = await supabaseAdmin
+          .from('profiles')
+          .select('sparks')
+          .eq('id', userId)
+          .single();
+
+        if (!fetchErr) {
+          const currentSparks = profile?.sparks || 0;
+          await supabaseAdmin
+            .from('profiles')
+            .update({ sparks: currentSparks + sparkAmount })
+            .eq('id', userId);
+        }
+      } else if (userId) {
+        // Grove Pro plan (subscription or lifetime)
+        const planId = session.metadata?.planId;
         await supabaseAdmin
           .from('profiles')
           .update({ pro: true, pro_plan: planId, stripe_customer_id: session.customer })
