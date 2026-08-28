@@ -2266,7 +2266,7 @@ function PlansPage({ state, actions }) {
       <SectionLabel label="Buy Sparks" icon={<Sparkles size={14} />} sub="Top up your Sparks balance for shiny skins and the AI Adviser" />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {SHINY_BUNDLES.map(b => (
-          <button key={b.id} onClick={() => actions.buySparkBundle(b.amount)} style={{
+          <button key={b.id} onClick={() => state.authUser ? actions.startSparkCheckout(b.id) : actions.buySparkBundle(b.amount)} style={{
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "14px 8px", borderRadius: 14,
             border: "1px solid var(--parchment-100)", background: "var(--parchment-50)", cursor: "pointer", boxShadow: "var(--shadow-card)",
           }}>
@@ -2276,7 +2276,9 @@ function PlansPage({ state, actions }) {
           </button>
         ))}
       </div>
-      <p style={{ padding: "6px 20px 0", fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center" }}>Demo only — tapping a bundle credits Sparks directly, no real payment is processed.</p>
+      <p style={{ padding: "6px 20px 0", fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center" }}>
+        {state.authUser ? "Secure checkout via Stripe." : "Sign in above for a real purchase — tapping a bundle while signed out just credits Sparks for local testing."}
+      </p>
 
       <SectionLabel label="AI Adviser" icon={<Sparkles size={14} />} sub={`${AI_ADVISER_COST} Sparks per message`} />
       <div style={{ padding: "0 20px" }}>
@@ -2862,8 +2864,9 @@ export default function GroveApp() {
       setFlowers(f => f + 1);
     },
     buyShiny: (shopId, cost) => {
-      if (shinyUnlocked.includes(shopId) || sparks < cost) return;
-      setSparks(s => Math.max(0, s - cost));
+      const currentSparks = auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks;
+      if (shinyUnlocked.includes(shopId) || currentSparks < cost) return;
+      if (auth.user) { auth.adjustSparks(-cost); } else { setSparks(s => Math.max(0, s - cost)); }
       setShinyUnlocked(list => [...list, shopId]);
     },
     toggleShinyVisible: (shopId) => {
@@ -2920,13 +2923,33 @@ export default function GroveApp() {
       setProPlan(null);
     },
     buySparkBundle: (amount) => {
-      // demo only — a real build would process payment first, then credit sparks
+      // local demo top-up — used only when signed out; signed-in purchases go through startSparkCheckout instead
       setSparks(s => s + amount);
     },
+    startSparkCheckout: async (bundleId) => {
+      if (!auth.user) return;
+      try {
+        const res = await fetch("/api/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bundleId, userId: auth.user.id, email: auth.user.email }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          alert(data.error || "Something went wrong starting checkout — please try again.");
+        }
+      } catch (err) {
+        alert("Couldn't reach the server. Please check your connection and try again.");
+      }
+    },
     spendSparks: (amount) => {
+      if (auth.user) { auth.adjustSparks(-amount); return; }
       setSparks(s => Math.max(0, s - amount));
     },
     refundSparks: (amount) => {
+      if (auth.user) { auth.adjustSparks(amount); return; }
       setSparks(s => s + amount);
     },
     signInWithEmail: (email) => auth.signInWithEmail(email),
@@ -2943,9 +2966,10 @@ export default function GroveApp() {
   // rather than the local demo toggle. Creator Mode always overrides, for testing.
   const effectivePro = creatorMode ? true : (auth.user && auth.profile ? auth.profile.pro : pro);
   const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : proPlan;
+  const effectiveSparks = creatorMode ? sparks : (auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks);
 
   const state = {
-    page, pro: effectivePro, points, flowers, sparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
+    page, pro: effectivePro, points, flowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
     unlocked, hiddenFeatureIds, unlockedEnvs, environment, placedItems, fogLevel,
     sharedUpdates, plannerItems,
     showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled,
