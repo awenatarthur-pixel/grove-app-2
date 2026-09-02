@@ -13,7 +13,7 @@ export function useAuth() {
     if (!userId) { setProfile(null); return; }
     const { data, error } = await supabase
       .from('profiles')
-      .select('pro, pro_plan, stripe_customer_id, sparks')
+      .select('pro, pro_plan, stripe_customer_id, sparks, flowers, referred_by')
       .eq('id', userId)
       .single();
     if (!error) setProfile(data);
@@ -63,6 +63,15 @@ export function useAuth() {
     if (!error) fetchProfile(session.user.id);
   };
 
+  // Adjusts the real Friendly Dragon (flower) count for a signed-in user.
+  const adjustFlowers = async (delta) => {
+    if (!session?.user) return;
+    const current = profile?.flowers || 0;
+    const next = Math.max(0, current + delta);
+    const { error } = await supabase.from('profiles').update({ flowers: next }).eq('id', session.user.id);
+    if (!error) fetchProfile(session.user.id);
+  };
+
   return {
     session,
     user: session?.user ?? null,
@@ -72,6 +81,7 @@ export function useAuth() {
     signOut,
     grantFreePro,
     adjustSparks,
+    adjustFlowers,
     refreshProfile: () => session?.user && fetchProfile(session.user.id),
   };
 }
