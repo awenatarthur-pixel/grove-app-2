@@ -802,7 +802,16 @@ function TheGrove({ state, actions }) {
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (err) {}
     const rect = canvasRef.current.getBoundingClientRect();
     const item = state.placedItems.find(it => it.id === id);
-    dragRef.current = { id, rect, type: item ? item.type : null, shopId: item ? item.shopId : null };
+    // Remember exactly where on the item you grabbed it, so it doesn't
+    // snap to be centered under the cursor the moment you start dragging.
+    let offsetX = 0, offsetY = 0;
+    if (item) {
+      const pointerXPct = ((e.clientX - rect.left) / rect.width) * 100;
+      const pointerYPct = ((e.clientY - rect.top) / rect.height) * 100;
+      offsetX = item.x - pointerXPct;
+      offsetY = item.y - pointerYPct;
+    }
+    dragRef.current = { id, rect, type: item ? item.type : null, shopId: item ? item.shopId : null, offsetX, offsetY };
     setDraggingId(id);
   };
   const onPointerMove = (e) => {
@@ -812,10 +821,10 @@ function TheGrove({ state, actions }) {
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       if (!dragRef.current || !pendingPos.current) return;
-      const { id, rect, type } = dragRef.current;
+      const { id, rect, type, offsetX, offsetY } = dragRef.current;
       const { clientX, clientY } = pendingPos.current;
-      let x = Math.min(94, Math.max(2, ((clientX - rect.left) / rect.width) * 100));
-      let y = Math.min(88, Math.max(30, ((clientY - rect.top) / rect.height) * 100));
+      let x = Math.min(94, Math.max(2, ((clientX - rect.left) / rect.width) * 100 + offsetX));
+      let y = Math.min(88, Math.max(30, ((clientY - rect.top) / rect.height) * 100 + offsetY));
 
       if (type === "lilypad") {
         const pond = state.placedItems.find(it => it.type === "pond");
@@ -1845,11 +1854,24 @@ function StatsPage({ state, actions }) {
   const [pulse, setPulse] = useState(false);
   const [inviteSent, setInviteSent] = useState(false);
   const [confirmShare, setConfirmShare] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const doneCount = state.positive.filter(h => h.doneToday).length;
   const totalCount = state.positive.length;
 
-  const invite = () => {
+  const invite = async () => {
+    if (state.authUser) {
+      const link = `${window.location.origin}/?ref=${state.authUser.id}`;
+      try {
+        await navigator.clipboard.writeText(link);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } catch (err) {
+        window.prompt("Copy your invite link:", link);
+      }
+      return;
+    }
+    // signed out — local demo fallback
     actions.inviteFriend();
     setInviteSent(true);
     setTimeout(() => setInviteSent(false), 2400);
@@ -1973,7 +1995,17 @@ function StatsPage({ state, actions }) {
           padding: "13px 16px", borderRadius: 16, border: "1.5px dashed var(--moss-400)",
           background: "transparent", color: "var(--moss-600)", cursor: "pointer",
           fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 14,
-        }}><UserPlus size={15} /> Invite a friend</button>
+        }}><UserPlus size={15} /> {state.authUser ? "Copy your invite link" : "Invite a friend"}</button>
+
+        {linkCopied && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, background: "rgba(233,196,106,0.2)",
+            borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
+            color: "var(--bark-900)", fontWeight: 600,
+          }}>
+            🔗 Link copied! Send it to a friend — you'll earn a Friendly Dragon and Grove Pro the moment they sign up.
+          </div>
+        )}
 
         {inviteSent && (
           <div style={{
@@ -2505,6 +2537,43 @@ export default function GroveApp() {
     }
   }, [auth.user]);
 
+  // Capture a friend's invite link (?ref=theirUserId) on first visit, store it for
+  // later — the person opening the link might browse a while before signing in.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref) {
+      try { window.localStorage.setItem("grove_referral_code", ref); } catch (err) {}
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  // Once signed in, if there's a stored referral code and this account hasn't
+  // been attributed to anyone yet, credit the referrer for real via the server.
+  useEffect(() => {
+    if (!auth.user || !auth.profile) return;
+    if (auth.profile.referred_by) return; // already attributed — never credit twice
+    let storedRef = null;
+    try { storedRef = window.localStorage.getItem("grove_referral_code"); } catch (err) {}
+    if (!storedRef || storedRef === auth.user.id) return;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/credit-referral", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newUserId: auth.user.id, referrerId: storedRef }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          try { window.localStorage.removeItem("grove_referral_code"); } catch (err) {}
+        }
+      } catch (err) {
+        // network hiccup — leave the stored code in place, we'll retry next time this effect runs
+      }
+    })();
+  }, [auth.user, auth.profile]);
+
   // Load any previously saved progress once, on first mount.
   useEffect(() => {
     let cancelled = false;
@@ -2790,9 +2859,10 @@ export default function GroveApp() {
       setFriends(list => list.map(f => f.id === id ? { ...f, kudos: f.kudos + 1 } : f));
     },
     inviteFriend: () => {
+      if (auth.user) return; // signed in: reward only lands once someone actually signs up via your link
+      // signed out — local demo fallback so the feature is still testable without an account
       setFlowers(f => f + 1);
       setPro(true);
-      if (auth.user) auth.grantFreePro();
     },
     subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); },
     shareProgress: (text) => {
@@ -2849,9 +2919,10 @@ export default function GroveApp() {
       setBonusDone(false);
     },
     plantFlower: () => {
-      if (flowers <= 0) return;
+      const currentFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
+      if (currentFlowers <= 0) return;
       if (placedItems.some(it => it.type === "frienddragon")) return; // max 1 dragon, ever
-      setFlowers(f => Math.max(0, f - 1));
+      if (auth.user) { auth.adjustFlowers(-1); } else { setFlowers(f => Math.max(0, f - 1)); }
       setPlacedItems(list => [...list, {
         id: "dragon-" + Date.now(), type: "frienddragon", emoji: "🐲",
         world: WORLD_BY_ENV[environment] || "land",
@@ -2861,7 +2932,7 @@ export default function GroveApp() {
     removeDragon: () => {
       if (!placedItems.some(it => it.type === "frienddragon")) return;
       setPlacedItems(list => list.filter(it => it.type !== "frienddragon"));
-      setFlowers(f => f + 1);
+      if (auth.user) { auth.adjustFlowers(1); } else { setFlowers(f => f + 1); }
     },
     buyShiny: (shopId, cost) => {
       const currentSparks = auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks;
@@ -2967,9 +3038,10 @@ export default function GroveApp() {
   const effectivePro = creatorMode ? true : (auth.user && auth.profile ? auth.profile.pro : pro);
   const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : proPlan;
   const effectiveSparks = creatorMode ? sparks : (auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks);
+  const effectiveFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
 
   const state = {
-    page, pro: effectivePro, points, flowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
+    page, pro: effectivePro, points, flowers: effectiveFlowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
     unlocked, hiddenFeatureIds, unlockedEnvs, environment, placedItems, fogLevel,
     sharedUpdates, plannerItems,
     showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled,
