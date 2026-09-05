@@ -37,12 +37,15 @@ export default async function handler(req, res) {
     // Lock in the attribution first, so a retry/race can't credit twice
     await supabaseAdmin.from('profiles').update({ referred_by: referrerId }).eq('id', newUserId);
 
-    // Reward the referrer: a Friendly Dragon (flower) and Grove Pro
+    // Reward the referrer with a Friendly Dragon (flower) — capped at 1, since only
+    // one dragon can ever be placed anyway, no point banking extras from more invites.
     const currentFlowers = referrerProfile.flowers || 0;
-    await supabaseAdmin
-      .from('profiles')
-      .update({ pro: true, flowers: currentFlowers + 1 })
-      .eq('id', referrerId);
+    if (currentFlowers < 1) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ flowers: 1 })
+        .eq('id', referrerId);
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {
