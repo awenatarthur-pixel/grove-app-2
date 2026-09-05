@@ -2003,7 +2003,7 @@ function StatsPage({ state, actions }) {
             borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
             color: "var(--bark-900)", fontWeight: 600,
           }}>
-            🔗 Link copied! Send it to a friend — you'll earn a Friendly Dragon and Grove Pro the moment they sign up.
+            🔗 Link copied! Send it to a friend — you'll earn a Friendly Dragon the moment they sign up.
           </div>
         )}
 
@@ -2013,7 +2013,7 @@ function StatsPage({ state, actions }) {
             borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
             color: "var(--bark-900)", fontWeight: 600,
           }}>
-            🐲 Invite sent — you earned a friendly dragon and Grove Pro!
+            🐲 Invite sent — you earned a friendly dragon!
           </div>
         )}
 
@@ -2861,8 +2861,7 @@ export default function GroveApp() {
     inviteFriend: () => {
       if (auth.user) return; // signed in: reward only lands once someone actually signs up via your link
       // signed out — local demo fallback so the feature is still testable without an account
-      setFlowers(f => f + 1);
-      setPro(true);
+      setFlowers(f => Math.min(1, f + 1));
     },
     subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); },
     shareProgress: (text) => {
