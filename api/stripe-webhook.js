@@ -51,30 +51,43 @@ export default async function handler(req, res) {
           .eq('id', userId)
           .single();
 
-        if (!fetchErr) {
+        if (fetchErr) {
+          console.error('Sparks purchase: failed to fetch profile for userId', userId, fetchErr);
+        } else {
           const currentSparks = profile?.sparks || 0;
-          await supabaseAdmin
+          const { error: updateErr } = await supabaseAdmin
             .from('profiles')
             .update({ sparks: currentSparks + sparkAmount })
             .eq('id', userId);
+          if (updateErr) {
+            console.error('Sparks purchase: failed to update sparks for userId', userId, updateErr);
+          } else {
+            console.log(`Sparks purchase: credited ${sparkAmount} to userId ${userId}, new total ${currentSparks + sparkAmount}`);
+          }
         }
       } else if (userId) {
         // Grove Pro plan (subscription or lifetime)
         const planId = session.metadata?.planId;
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
           .from('profiles')
           .update({ pro: true, pro_plan: planId, stripe_customer_id: session.customer })
           .eq('id', userId);
+        if (updateErr) {
+          console.error('Pro purchase: failed to update profile for userId', userId, updateErr);
+        }
       }
     }
 
     // If a monthly/yearly subscription is cancelled or fails renewal, revoke Pro access.
     if (event.type === 'customer.subscription.deleted') {
       const subscription = event.data.object;
-      await supabaseAdmin
+      const { error: cancelErr } = await supabaseAdmin
         .from('profiles')
         .update({ pro: false, pro_plan: null })
         .eq('stripe_customer_id', subscription.customer);
+      if (cancelErr) {
+        console.error('Subscription cancellation: failed to update profile', cancelErr);
+      }
     }
 
     res.status(200).json({ received: true });
