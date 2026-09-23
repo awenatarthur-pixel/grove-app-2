@@ -6,7 +6,7 @@ import {
   ListChecks, Trees, BarChart2, Plus, Lock, X, Check, Flame,
   Sparkles, Heart, ShoppingBag, Trophy, UserPlus, Flower2, Crown,
   ChevronRight, Settings2, Droplets, ArrowLeft, TrendingUp, CalendarDays,
-  Trash2, Share2, ListTodo, Sprout, RotateCcw, Lightbulb, Pencil, Eye, EyeOff
+  Trash2, Share2, ListTodo, Sprout, RotateCcw, Lightbulb, Pencil, Eye, EyeOff, BookOpen
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------
@@ -848,6 +848,7 @@ function TheGrove({ state, actions }) {
   const [namingAnimalId, setNamingAnimalId] = useState(null);
   const [nameDraft, setNameDraft] = useState("");
   const nameModalRef = useRef(null);
+  const [showCompendium, setShowCompendium] = useState(false);
   const dragRef = useRef(null);
 
   const env = ENVIRONMENTS.find(e => e.id === state.environment) || ENVIRONMENTS[0];
@@ -927,6 +928,10 @@ function TheGrove({ state, actions }) {
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     setDraggingId(null);
   };
+
+  if (showCompendium) {
+    return <AnimalCompendium state={state} onBack={() => setShowCompendium(false)} />;
+  }
 
   return (
     <div style={{ paddingBottom: 100 }}>
@@ -1503,7 +1508,7 @@ function TheGrove({ state, actions }) {
                 <button
                   onClick={e => { e.stopPropagation(); setNameDraft(item.name || ""); setNamingAnimalId(item.id); }}
                   style={{
-                    position: "absolute", left: "50%", top: size * 0.88, transform: "translateX(-50%)",
+                    position: "absolute", left: "50%", top: -size * 0.62, transform: "translateX(-50%)",
                     display: "flex", alignItems: "center", gap: 3, border: "none", cursor: "pointer",
                     background: item.name ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.55)",
                     borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap",
@@ -1601,6 +1606,15 @@ function TheGrove({ state, actions }) {
           background: "var(--moss-600)", color: "#fff", fontFamily: "'Manrope', sans-serif",
           fontWeight: 700, fontSize: 14, boxShadow: "var(--shadow-card)",
         }}><ShoppingBag size={16} /> Grove shop</button>
+      </div>
+
+      <div style={{ padding: "10px 20px 0" }}>
+        <button onClick={() => setShowCompendium(true)} style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          padding: "13px 16px", borderRadius: 16, border: "1.5px solid var(--parchment-100)", cursor: "pointer",
+          background: "var(--parchment-50)", color: "var(--forest-900)", fontFamily: "'Manrope', sans-serif",
+          fontWeight: 700, fontSize: 14, boxShadow: "var(--shadow-card)",
+        }}><BookOpen size={16} /> Grove Compendium</button>
       </div>
 
       <div style={{ padding: "10px 20px 0" }}>
@@ -1953,6 +1967,94 @@ function TheGrove({ state, actions }) {
         @keyframes grove-fog { 0% { opacity: 0.5; } 100% { opacity: 1; } }
         @keyframes grove-pop2 { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
       `}</style>
+    </div>
+  );
+}
+
+// Short, gentle flavor text per species — shown once discovered.
+const ANIMAL_LORE = {
+  fox: "Quick and curious — always the first to notice something new in the grove.",
+  dog: "Loyal and endlessly pleased to see you, rain or shine.",
+  horse: "Steady and patient — a calm presence when the grove feels busy.",
+  fish: "Content to drift in slow circles, marking the seasons of the pond.",
+  butterfly: "Appears on the good days, and always comes back again.",
+  chameleon: "Changes with its surroundings, but always finds its way back to you.",
+  monkey: "Mischievous and clever, never quite still for long.",
+  toucan: "Bright and bold — impossible to miss against the canopy.",
+  sloth: "In no hurry at all, and somehow that's exactly the point.",
+  parrot: "Picks up on your routines fast, and never lets you forget them.",
+  clownfish: "Small, bright, and always weaving through the coral.",
+  angelfish: "Graceful and unhurried, gliding wherever the current takes it.",
+  pufferfish: "Puffs up when startled, but mostly just drifts along, content.",
+  turtle: "Ancient and unhurried, and somehow always exactly on time.",
+  octopus: "Clever enough to notice patterns — including yours.",
+  seahorse: "Delicate and upright, surprisingly hard to spot at first.",
+};
+
+/* -------------------------------------------------------------------------
+   Grove Compendium — every discoverable animal, named/leveled where owned
+------------------------------------------------------------------------- */
+function AnimalCompendium({ state, onBack }) {
+  const worlds = [
+    { id: "land", label: "Land" },
+    { id: "rainforest", label: "Rainforest" },
+    { id: "cave", label: "Underwater Cave" },
+  ];
+  const speciesByWorld = (worldId) => SHOP_ITEMS.filter(it => it.type === "animal" && it.world === worldId);
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <TopBar title="Grove Compendium" onBack={onBack} />
+      <p style={{ padding: "0 20px", fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", marginBottom: 4 }}>
+        Every creature that can live in your grove — discover them by unlocking each one from the shop.
+      </p>
+      {worlds.map(w => (
+        <div key={w.id}>
+          <SectionLabel label={w.label} icon={<Trees size={14} />} />
+          <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 8 }}>
+            {speciesByWorld(w.id).map(species => {
+              const discovered = state.unlocked.includes(species.id);
+              const instance = state.placedItems.find(it => it.shopId === species.id);
+              const level = instance ? animalLevel(instance.xp) : null;
+              const linkedHabit = instance ? state.positive.find(h => h.animalId === instance.id) : null;
+              return (
+                <div key={species.id} style={{
+                  background: "var(--parchment-50)", borderRadius: 16, padding: "14px 12px",
+                  boxShadow: "var(--shadow-card)", textAlign: "center", opacity: discovered ? 1 : 0.75,
+                }}>
+                  <div style={{ fontSize: 32, marginBottom: 4, filter: discovered ? "none" : "grayscale(1) brightness(0.75)" }}>
+                    {discovered ? species.emoji : "❓"}
+                  </div>
+                  <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, color: "var(--forest-900)" }}>
+                    {discovered ? (instance?.name || species.label) : "???"}
+                  </div>
+                  {discovered && instance && (
+                    <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--moss-600)", marginTop: 2 }}>
+                      Level {level} · {animalGrowthStage(level)}
+                    </div>
+                  )}
+                  {discovered && !instance && (
+                    <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: "var(--bark-700)", marginTop: 2 }}>
+                      In your collection — place it in the grove to see its progress
+                    </div>
+                  )}
+                  <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", marginTop: 6, lineHeight: 1.4 }}>
+                    {discovered ? ANIMAL_LORE[species.id] : "A creature waiting to be discovered in your grove."}
+                  </div>
+                  {discovered && linkedHabit && (
+                    <div style={{
+                      marginTop: 8, display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(82,121,111,0.12)",
+                      borderRadius: 999, padding: "3px 8px", fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10, color: "var(--moss-600)",
+                    }}>
+                      📚 {linkedHabit.name}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
