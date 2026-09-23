@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useAuth } from "./useAuth";
 import AuthPanel from "./AuthPanel";
@@ -6,7 +6,7 @@ import {
   ListChecks, Trees, BarChart2, Plus, Lock, X, Check, Flame,
   Sparkles, Heart, ShoppingBag, Trophy, UserPlus, Flower2, Crown,
   ChevronRight, Settings2, Droplets, ArrowLeft, TrendingUp, CalendarDays,
-  Trash2, Share2, ListTodo, Sprout, RotateCcw, Lightbulb, Pencil
+  Trash2, Share2, ListTodo, Sprout, RotateCcw, Lightbulb, Pencil, Eye, EyeOff
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------
@@ -82,6 +82,22 @@ function bestStreak(history) {
   for (const v of history) { if (v) { cur++; best = Math.max(best, cur); } else cur = 0; }
   return best;
 }
+// Consistency is a gentler, more forgiving number than a streak — the percentage
+// of days completed over the whole tracked history, so one missed day barely moves it.
+function consistencyPct(history) {
+  if (!history || !history.length) return 0;
+  const done = history.filter(v => v === 1).length;
+  return Math.round((done / history.length) * 100);
+}
+// A "recovery" is coming back after a miss — celebrated, not penalized.
+function recoveryCount(history) {
+  if (!history) return 0;
+  let count = 0;
+  for (let i = 1; i < history.length; i++) {
+    if (history[i] === 1 && history[i - 1] === 0) count++;
+  }
+  return count;
+}
 function currentWeekDates() {
   // Monday-start week containing today
   const today = startOfDay(new Date());
@@ -139,6 +155,8 @@ const SHOP_ITEMS = [
   { id: "fish", label: "Fish", emoji: "🐟", cost: 60, type: "animal", requires: "pond", world: "land" },
   { id: "lilypad", label: "Lily Pad", emoji: "🍃", cost: 120, type: "lilypad", requires: "pond", livesOn: "pond", world: "land" },
   { id: "frog-blue", label: "Frog (Blue & Black)", emoji: "🐸", cost: 300, type: "frog", requires: "lilypad", livesOn: "lilypad", colors: ["#2e6fbf", "#1a1a1a"], world: "land" },
+  { id: "wildflowers", label: "Wildflowers", emoji: "🌼", cost: 45, type: "decor", world: "land" },
+  { id: "butterfly", label: "Butterfly", emoji: "🦋", cost: 70, type: "animal", world: "land" },
 
   // --- Rainforest ---
   { id: "jungletree", label: "Jungle Tree", emoji: "🌴", cost: 150, type: "decor", world: "rainforest" },
@@ -149,6 +167,7 @@ const SHOP_ITEMS = [
   { id: "toucan", label: "Toucan", emoji: "🦜", cost: 170, type: "animal", world: "rainforest" },
   { id: "sloth", label: "Sloth", emoji: "🦥", cost: 210, type: "animal", world: "rainforest", requires: "jungletree", livesOn: "jungletree" },
   { id: "rain", label: "Rain", emoji: "🌧️", cost: 180, type: "feature", world: "rainforest" },
+  { id: "parrot", label: "Parrot", emoji: "🦚", cost: 190, type: "animal", world: "rainforest" },
 
   // --- Underwater Cave ---
   { id: "coral", label: "Coral", emoji: "🪸", cost: 130, type: "decor", world: "cave" },
@@ -159,6 +178,7 @@ const SHOP_ITEMS = [
   { id: "pufferfish", label: "Pufferfish", emoji: "🐡", cost: 90, type: "animal", world: "cave" },
   { id: "turtle", label: "Sea Turtle", emoji: "🐢", cost: 180, type: "animal", world: "cave" },
   { id: "octopus", label: "Octopus", emoji: "🐙", cost: 260, type: "animal", world: "cave" },
+  { id: "seahorse", label: "Seahorse", emoji: "🦄", cost: 150, type: "animal", world: "cave" },
 ];
 
 const ENVIRONMENTS = [
@@ -241,6 +261,19 @@ const DAILY_QUOTES = [
   { text: "You wouldn't worry so much about what others think of you if you realized how seldom they do.", author: "Eleanor Roosevelt" },
   { text: "The question isn't who is going to let me; it's who is going to stop me.", author: "Ayn Rand" },
 ];
+// An animal's level and growth stage are purely derived from its XP —
+// XP only ever goes up (or is undone alongside its own habit tick), never
+// reduced for a missed day, so an animal's progress is never punished.
+function animalLevel(xp) {
+  return Math.floor((xp || 0) / 100) + 1;
+}
+function animalGrowthStage(level) {
+  if (level >= 20) return "Grove Guardian";
+  if (level >= 10) return "Companion";
+  if (level >= 5) return "Familiar";
+  return "Young";
+}
+
 function dailyQuoteOfDay() {
   const start = new Date(2024, 0, 1);
   const days = Math.floor((startOfDay(new Date()) - start) / 86400000);
@@ -515,19 +548,22 @@ function HabitTracker({ state, actions }) {
   const [editingTarget, setEditingTarget] = useState(null);
   const [slipMsg, setSlipMsg] = useState({}); // { [habitId]: message }
   const [editingHabit, setEditingHabit] = useState(null); // { kind, id, name }
+  const addModalRef = useRef(null);
+  const editModalRef = useRef(null);
 
   const submitAdd = () => {
     if (!draft.trim()) return;
     if (adding === "positive") actions.addHabit("positive", draft.trim());
     else actions.addHabit("negative", draft.trim());
     setDraft("");
-    setAdding(null);
+    addModalRef.current?.requestClose();
   };
 
   const submitEdit = () => {
     if (!editingHabit) return;
-    actions.editHabit(editingHabit.kind, editingHabit.id, editingHabit.name);
-    setEditingHabit(null);
+    const { kind, id, ...patch } = editingHabit;
+    actions.editHabit(kind, id, patch);
+    editModalRef.current?.requestClose();
   };
 
   const slip = (id) => {
@@ -575,7 +611,7 @@ function HabitTracker({ state, actions }) {
                   <Flame size={12} /> {h.streak}-day streak
                 </div>
               </div>
-              <button onClick={e => { e.stopPropagation(); setEditingHabit({ kind: "positive", id: h.id, name: h.name }); }} style={{
+              <button onClick={e => { e.stopPropagation(); setEditingHabit({ kind: "positive", id: h.id, name: h.name, why: h.why || "", goal: h.goal || "", animalId: h.animalId || null }); }} style={{
                 border: "none", background: "none", cursor: "pointer", color: "var(--moss-400)", display: "flex", flexShrink: 0,
               }}><Pencil size={14} /></button>
               <button onClick={e => { e.stopPropagation(); actions.deleteHabit("positive", h.id); }} style={{
@@ -594,7 +630,7 @@ function HabitTracker({ state, actions }) {
       </div>
 
       {/* Negative habits */}
-      <SectionLabel label="Habits to break" icon={<Droplets size={14} />} sub="+6 pts per clean habit today (max +24), −6 per slip · fog rolls in from Thursday if you miss target" />
+      <SectionLabel label="Habits to break" icon={<Droplets size={14} />} sub="+6 pts per clean habit today (max +24), −6 per slip · a little fog drifts in from Thursday if you're behind on your target — it always clears once you catch up" />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 10, alignItems: "start" }}>
         {negative.map(h => (
           <div key={h.id} style={{
@@ -660,7 +696,7 @@ function HabitTracker({ state, actions }) {
       </div>
 
       {adding && (
-        <Modal onClose={() => setAdding(null)}>
+        <Modal ref={addModalRef} onClose={() => setAdding(null)}>
           <h3 style={modalTitleStyle}>{adding === "positive" ? "New habit to grow" : "New habit to break"}</h3>
           <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submitAdd()}
@@ -671,13 +707,38 @@ function HabitTracker({ state, actions }) {
       )}
 
       {editingHabit && (
-        <Modal onClose={() => setEditingHabit(null)}>
-          <h3 style={modalTitleStyle}>Rename habit</h3>
+        <Modal ref={editModalRef} onClose={() => setEditingHabit(null)}>
+          <h3 style={modalTitleStyle}>Edit habit</h3>
           <input autoFocus value={editingHabit.name}
             onChange={e => setEditingHabit(h => ({ ...h, name: e.target.value }))}
-            onKeyDown={e => e.key === "Enter" && submitEdit()}
+            onKeyDown={e => e.key === "Enter" && !e.shiftKey && submitEdit()}
             style={inputStyle} />
-          <button onClick={submitEdit} style={primaryBtnStyle}>Save</button>
+          {editingHabit.kind === "positive" && (
+            <>
+              <label style={{ display: "block", fontFamily: "'Manrope', sans-serif", fontSize: 12, fontWeight: 700, color: "var(--bark-700)", marginTop: 12, marginBottom: 4 }}>Why this habit? <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional)</span></label>
+              <input value={editingHabit.why || ""} placeholder="e.g. I want to spend less time scrolling"
+                onChange={e => setEditingHabit(h => ({ ...h, why: e.target.value }))}
+                style={inputStyle} />
+              <label style={{ display: "block", fontFamily: "'Manrope', sans-serif", fontSize: 12, fontWeight: 700, color: "var(--bark-700)", marginTop: 10, marginBottom: 4 }}>Goal <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional)</span></label>
+              <input value={editingHabit.goal || ""} placeholder="e.g. Finish 12 books this year"
+                onChange={e => setEditingHabit(h => ({ ...h, goal: e.target.value }))}
+                style={inputStyle} />
+              {state.placedItems.some(it => it.type === "animal") && (
+                <>
+                  <label style={{ display: "block", fontFamily: "'Manrope', sans-serif", fontSize: 12, fontWeight: 700, color: "var(--bark-700)", marginTop: 10, marginBottom: 4 }}>Linked animal <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional — earns XP when you complete this habit)</span></label>
+                  <select value={editingHabit.animalId || ""}
+                    onChange={e => setEditingHabit(h => ({ ...h, animalId: e.target.value || null }))}
+                    style={{ ...inputStyle, cursor: "pointer" }}>
+                    <option value="">No linked animal</option>
+                    {state.placedItems.filter(it => it.type === "animal").map(it => (
+                      <option key={it.id} value={it.id}>{it.emoji} {it.name || it.shopId}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </>
+          )}
+          <button onClick={submitEdit} style={{ ...primaryBtnStyle, marginTop: 14 }}>Save</button>
         </Modal>
       )}
 
@@ -702,16 +763,25 @@ function HabitDetail({ habit, onBack }) {
   const totalTicks = habit.history.reduce((a, b) => a + b, 0);
   const completionRate = Math.round((totalTicks / habit.history.length) * 100);
   const best = bestStreak(habit.history);
+  const recoveries = recoveryCount(habit.history);
 
   return (
     <div style={{ paddingBottom: 100 }}>
       <TopBar title={habit.name} onBack={onBack} />
 
-      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
+      {(habit.why || habit.goal) && (
+        <div style={{ margin: "0 20px 14px", background: "rgba(233,196,106,0.14)", borderRadius: 14, padding: "12px 14px" }}>
+          {habit.why && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-900)", marginBottom: habit.goal ? 4 : 0 }}>💭 {habit.why}</div>}
+          {habit.goal && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, fontWeight: 700, color: "var(--forest-900)" }}>🎯 {habit.goal}</div>}
+        </div>
+      )}
+
+      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(80px, 1fr))", gap: 8, marginBottom: 16 }}>
         {[
           { label: "Current streak", value: habit.streak, icon: <Flame size={14} /> },
           { label: "Best streak", value: best, icon: <TrendingUp size={14} /> },
-          { label: "Completion", value: `${completionRate}%`, icon: <Sprout size={14} /> },
+          { label: "Consistency", value: `${completionRate}%`, icon: <Sprout size={14} /> },
+          { label: "Recoveries", value: recoveries, icon: <Heart size={14} /> },
         ].map(stat => (
           <div key={stat.label} style={{
             background: "var(--parchment-50)", borderRadius: 14, padding: "12px 10px",
@@ -774,6 +844,10 @@ function TheGrove({ state, actions }) {
   const [quoteEmoji, setQuoteEmoji] = useState("🌱");
   const [hearts, setHearts] = useState([]);
   const canvasRef = useRef(null);
+  const resetModalRef = useRef(null);
+  const [namingAnimalId, setNamingAnimalId] = useState(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const nameModalRef = useRef(null);
   const dragRef = useRef(null);
 
   const env = ENVIRONMENTS.find(e => e.id === state.environment) || ENVIRONMENTS[0];
@@ -1425,6 +1499,21 @@ function TheGrove({ state, actions }) {
                   filter: "blur(1.5px)", animation: isDraggingThis ? "none" : `grove-shadow ${animDur}s ease-in-out infinite`,
                 }} />
               )}
+              {isAnimal && !isDraggingThis && (
+                <button
+                  onClick={e => { e.stopPropagation(); setNameDraft(item.name || ""); setNamingAnimalId(item.id); }}
+                  style={{
+                    position: "absolute", left: "50%", top: size * 0.88, transform: "translateX(-50%)",
+                    display: "flex", alignItems: "center", gap: 3, border: "none", cursor: "pointer",
+                    background: item.name ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.55)",
+                    borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap",
+                    fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 9.5, color: "var(--forest-900)",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.12)", zIndex: 2,
+                  }}
+                >
+                  {item.name ? `${item.name} · Lv.${animalLevel(item.xp)}` : "+ name"}
+                </button>
+              )}
               <div style={{
                 position: "relative", width: size, height: size,
                 transform: `translate(-50%,-50%) scale(${isDraggingThis ? 1.1 : 1})`,
@@ -1694,17 +1783,52 @@ function TheGrove({ state, actions }) {
       </div>
 
       {state.showResetConfirm && (
-        <Modal onClose={actions.closeResetConfirm}>
+        <Modal ref={resetModalRef} onClose={actions.closeResetConfirm}>
           <h3 style={modalTitleStyle}>Reset the grove?</h3>
           <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: "var(--forest-900)", lineHeight: 1.5 }}>
             This puts every habit, purchase, environment, planner entry, and shared update back to the starting demo state. This can't be undone.
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button onClick={actions.closeResetConfirm} style={{ ...primaryBtnStyle, background: "var(--parchment-100)", color: "var(--bark-700)" }}>Cancel</button>
-            <button onClick={actions.confirmReset} style={{ ...primaryBtnStyle, background: "var(--blush-500)", color: "#fff" }}>Reset everything</button>
+            <button onClick={() => resetModalRef.current?.requestClose()} style={{ ...primaryBtnStyle, background: "var(--parchment-100)", color: "var(--bark-700)" }}>Cancel</button>
+            <button onClick={() => { actions.performReset(); resetModalRef.current?.requestClose(); }} style={{ ...primaryBtnStyle, background: "var(--blush-500)", color: "#fff" }}>Reset everything</button>
           </div>
         </Modal>
       )}
+
+      {namingAnimalId && (() => {
+        const animal = state.placedItems.find(it => it.id === namingAnimalId);
+        if (!animal) return null;
+        const level = animalLevel(animal.xp);
+        const xpIntoLevel = (animal.xp || 0) % 100;
+        const linkedHabit = state.positive.find(h => h.animalId === namingAnimalId);
+        return (
+          <Modal ref={nameModalRef} onClose={() => setNamingAnimalId(null)}>
+            <div style={{ textAlign: "center", marginBottom: 10 }}>
+              <span style={{ fontSize: 44 }}>{animal.emoji}</span>
+            </div>
+            <input autoFocus value={nameDraft} placeholder="Give this animal a name"
+              onChange={e => setNameDraft(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (actions.renameAnimal(namingAnimalId, nameDraft), nameModalRef.current?.requestClose())}
+              style={{ ...inputStyle, textAlign: "center", fontWeight: 700 }} maxLength={24} />
+
+            <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--forest-900)" }}>Level {level} · {animalGrowthStage(level)}</span>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)" }}>{xpIntoLevel} / 100 XP</span>
+            </div>
+            <div style={{ background: "var(--parchment-100)", borderRadius: 999, height: 8, marginTop: 6, overflow: "hidden" }}>
+              <div style={{ width: `${xpIntoLevel}%`, height: "100%", background: "var(--moss-600)", borderRadius: 999, transition: "width .3s ease" }} />
+            </div>
+
+            <div style={{ marginTop: 12, fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)" }}>
+              {linkedHabit
+                ? <>Gains XP whenever you complete <strong style={{ color: "var(--forest-900)" }}>{linkedHabit.name}</strong>.</>
+                : "Not linked to a habit yet — link one from the habit's edit menu to start earning XP."}
+            </div>
+
+            <button onClick={() => { actions.renameAnimal(namingAnimalId, nameDraft); nameModalRef.current?.requestClose(); }} style={{ ...primaryBtnStyle, marginTop: 14 }}>Save</button>
+          </Modal>
+        );
+      })()}
 
       {state.showFeedback && (
         <Modal onClose={actions.closeFeedback}>
@@ -1854,10 +1978,24 @@ function StatsPage({ state, actions }) {
   const [pulse, setPulse] = useState(false);
   const [inviteSent, setInviteSent] = useState(false);
   const [confirmShare, setConfirmShare] = useState(false);
+  const shareModalRef = useRef(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
   const doneCount = state.positive.filter(h => h.doneToday).length;
   const totalCount = state.positive.length;
+
+  // Deeper, gentler analytics — consistency over a window is more forgiving
+  // than a raw streak, so one missed day barely moves it.
+  const lastN = (arr, n) => arr.slice(Math.max(0, arr.length - n));
+  const weekPct = state.positive.length
+    ? Math.round(state.positive.reduce((sum, h) => sum + consistencyPct(lastN(h.history, 7)), 0) / state.positive.length)
+    : 0;
+  const monthPct = state.positive.length
+    ? Math.round(state.positive.reduce((sum, h) => sum + consistencyPct(lastN(h.history, 30)), 0) / state.positive.length)
+    : 0;
+  const habitRates = state.positive.map(h => ({ name: h.name, pct: consistencyPct(h.history) }));
+  const mostSuccessful = habitRates.length ? habitRates.reduce((a, b) => (b.pct > a.pct ? b : a)) : null;
+  const mostDifficult = habitRates.length > 1 ? habitRates.reduce((a, b) => (b.pct < a.pct ? b : a)) : null;
 
   const invite = async () => {
     if (state.authUser) {
@@ -1895,6 +2033,40 @@ function StatsPage({ state, actions }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+
+      <div style={{ margin: "0 20px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 8 }}>
+        {[
+          { label: "Today", value: `${doneCount}/${totalCount}` },
+          { label: "This week", value: `${weekPct}%` },
+          { label: "This month", value: `${monthPct}%` },
+        ].map(stat => (
+          <div key={stat.label} style={{ background: "var(--parchment-50)", borderRadius: 14, padding: "10px 8px", textAlign: "center", boxShadow: "var(--shadow-card)" }}>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 18, color: "var(--forest-900)" }}>{stat.value}</div>
+            <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: "var(--bark-700)" }}>{stat.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {mostSuccessful && (
+        <div style={{ margin: "0 20px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--parchment-50)",
+            borderRadius: 12, padding: "9px 14px", boxShadow: "var(--shadow-card)",
+          }}>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)" }}>Most consistent</span>
+            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: "var(--forest-900)" }}>{mostSuccessful.name} — {mostSuccessful.pct}%</span>
+          </div>
+          {mostDifficult && mostDifficult.name !== mostSuccessful.name && (
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--parchment-50)",
+              borderRadius: 12, padding: "9px 14px", boxShadow: "var(--shadow-card)",
+            }}>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)" }}>Room to grow</span>
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: "var(--forest-900)" }}>{mostDifficult.name} — {mostDifficult.pct}%</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ margin: "0 20px 16px" }}>
         <button onClick={() => { setPulse(true); setTimeout(() => setPulse(false), 500); }} style={{
@@ -1970,9 +2142,22 @@ function StatsPage({ state, actions }) {
         </div>
       </div>
 
-      <SectionLabel label="Leaderboard" icon={<Trophy size={14} />} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px" }}>
+        <SectionLabel label="Leaderboard" icon={<Trophy size={14} />} />
+        <button onClick={() => actions.setLeaderboardHidden(!state.leaderboardHidden)} style={{
+          display: "flex", alignItems: "center", gap: 5, border: "none", background: "none", cursor: "pointer",
+          fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--bark-700)", marginBottom: 6,
+        }}>{state.leaderboardHidden ? <EyeOff size={13} /> : <Eye size={13} />} {state.leaderboardHidden ? "Hidden" : "Visible"}</button>
+      </div>
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10, alignItems: "start" }}>
-        {state.friends.map(f => (
+        {state.leaderboardHidden ? (
+          <div style={{
+            background: "var(--parchment-50)", borderRadius: 16, padding: "14px", textAlign: "center",
+            fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", gridColumn: "1 / -1",
+          }}>
+            You're hidden from the leaderboard — no one can see your progress here, and you can't see theirs. Toggle "Visible" above any time.
+          </div>
+        ) : state.friends.map(f => (
           <div key={f.id} style={{
             background: "var(--parchment-50)", borderRadius: 16, padding: "12px 14px",
             display: "flex", alignItems: "center", gap: 10, boxShadow: "var(--shadow-card)",
@@ -2023,14 +2208,14 @@ function StatsPage({ state, actions }) {
       </div>
 
       {confirmShare && (
-        <Modal onClose={() => setConfirmShare(false)}>
+        <Modal ref={shareModalRef} onClose={() => setConfirmShare(false)}>
           <h3 style={modalTitleStyle}>Share with friends?</h3>
           <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: "var(--forest-900)", lineHeight: 1.5 }}>
             Your friends will see: <strong>"{shareText}"</strong>. Nothing is shared unless you confirm — you choose every time.
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button onClick={() => setConfirmShare(false)} style={{ ...primaryBtnStyle, background: "var(--parchment-100)", color: "var(--bark-700)" }}>Not now</button>
-            <button onClick={() => { actions.shareProgress(shareText); setConfirmShare(false); }} style={primaryBtnStyle}>Share</button>
+            <button onClick={() => shareModalRef.current?.requestClose()} style={{ ...primaryBtnStyle, background: "var(--parchment-100)", color: "var(--bark-700)" }}>Not now</button>
+            <button onClick={() => { actions.shareProgress(shareText); shareModalRef.current?.requestClose(); }} style={primaryBtnStyle}>Share</button>
           </div>
         </Modal>
       )}
@@ -2047,12 +2232,13 @@ function Planner({ state, actions }) {
   const [celebrating, setCelebrating] = useState(null); // item id currently bursting confetti
   const weekDates = currentWeekDates();
   const perDayLimit = state.pro ? PRO_PLANNER_PER_DAY : FREE_PLANNER_PER_DAY;
+  const addPlannerModalRef = useRef(null);
 
   const submit = () => {
     if (!draft.trim() || !addingFor) return;
     actions.addPlannerItem(addingFor, draft.trim());
     setDraft("");
-    setAddingFor(null);
+    addPlannerModalRef.current?.requestClose();
   };
 
   const toggleDone = (iso, it) => {
@@ -2158,7 +2344,7 @@ function Planner({ state, actions }) {
       </div>
 
       {addingFor && (
-        <Modal onClose={() => setAddingFor(null)}>
+        <Modal ref={addPlannerModalRef} onClose={() => setAddingFor(null)}>
           <h3 style={modalTitleStyle}>Add to your plan</h3>
           <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submit()}
@@ -2188,6 +2374,32 @@ function PlansPage({ state, actions }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [loadingPlanId, setLoadingPlanId] = useState(null);
+  const [loadingBundleId, setLoadingBundleId] = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const anyPaymentActionLoading = loadingPlanId !== null || loadingBundleId !== null || portalLoading;
+
+  const handleChoosePlan = async (planId) => {
+    if (anyPaymentActionLoading) return;
+    setLoadingPlanId(planId);
+    await actions.startCheckout(planId);
+    setLoadingPlanId(null); // only runs if it didn't redirect — i.e. something went wrong
+  };
+
+  const handleBuyBundle = async (bundleId, amount) => {
+    if (anyPaymentActionLoading) return;
+    if (!state.authUser) { actions.buySparkBundle(amount); return; }
+    setLoadingBundleId(bundleId);
+    await actions.startSparkCheckout(bundleId);
+    setLoadingBundleId(null);
+  };
+
+  const handleManageSubscription = async () => {
+    if (anyPaymentActionLoading) return;
+    setPortalLoading(true);
+    await actions.manageSubscription();
+    setPortalLoading(false);
+  };
 
   useEffect(() => { actions.ensureLifetimeOfferStarted(); }, []);
   useEffect(() => {
@@ -2208,6 +2420,17 @@ function PlansPage({ state, actions }) {
     setAiLoading(true);
     setAiError(null);
     actions.spendSparks(AI_ADVISER_COST);
+
+    // Give the AI real, specific data about the user's actual habits — never invented.
+    const habitContext = state.positive.length
+      ? state.positive.map(h => {
+          const parts = [`"${h.name}": ${consistencyPct(h.history.slice(-7))}% this week, ${consistencyPct(h.history.slice(-30))}% this month, current streak ${h.streak} days`];
+          if (h.why) parts.push(`why it matters to them: "${h.why}"`);
+          if (h.goal) parts.push(`their goal: "${h.goal}"`);
+          return "- " + parts.join(" | ");
+        }).join("\n")
+      : "The user hasn't added any habits yet.";
+
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -2215,7 +2438,7 @@ function PlansPage({ state, actions }) {
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
           max_tokens: 400,
-          system: "You are the Grove AI Adviser — a warm, encouraging habit coach inside a plant-growing self-improvement app called Grove. Give brief, practical, kind advice about habits, motivation, and daily routines. Keep replies to 2-4 short sentences, conversational and supportive, never clinical.",
+          system: `You are the Grove AI Adviser — a warm, encouraging habit coach inside a plant-growing self-improvement app called Grove. Give brief, practical, kind advice about habits, motivation, and daily routines. Keep replies to 2-4 short sentences, conversational and supportive, never clinical. Ground your advice in the user's real data below when relevant — reference specific habits, streaks, or goals by name rather than speaking generically. Never invent data you weren't given; if you don't have enough information for something, say so plainly instead of guessing.\n\nThe user's current habits:\n${habitContext}`,
           messages: newMessages.map(m => ({ role: m.role, content: m.text })),
         }),
       });
@@ -2235,14 +2458,27 @@ function PlansPage({ state, actions }) {
       <TopBar title="Plans" right={<SparksPill sparks={state.sparks} />} />
 
       <div style={{ padding: "0 20px" }}>
+        {state.checkoutCancelled && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+            background: "rgba(236,138,114,0.14)", borderRadius: 12, padding: "10px 14px", marginBottom: 10,
+            fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-900)",
+          }}>
+            <span>Checkout was cancelled — no payment was taken. Feel free to try again whenever you're ready.</span>
+            <button onClick={actions.dismissCheckoutCancelled} style={{
+              border: "none", background: "none", cursor: "pointer", color: "var(--bark-700)",
+              fontSize: 16, lineHeight: 1, flexShrink: 0,
+            }}>×</button>
+          </div>
+        )}
         <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
         {state.authUser && state.hasStripeCustomer && (
-          <button onClick={actions.manageSubscription} style={{
+          <button onClick={handleManageSubscription} disabled={portalLoading} style={{
             width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            padding: "10px 14px", borderRadius: 12, border: "1.5px solid var(--parchment-100)", cursor: "pointer",
-            background: "transparent", color: "var(--bark-700)",
+            padding: "10px 14px", borderRadius: 12, border: "1.5px solid var(--parchment-100)", cursor: portalLoading ? "default" : "pointer",
+            background: "transparent", color: "var(--bark-700)", opacity: portalLoading ? 0.6 : 1,
             fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, marginBottom: 10,
-          }}>Manage subscription</button>
+          }}>{portalLoading ? "Opening…" : "Manage subscription"}</button>
         )}
       </div>
 
@@ -2280,13 +2516,13 @@ function PlansPage({ state, actions }) {
                 )}
               </div>
               <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 17, color: "var(--forest-900)", flexShrink: 0 }}>{p.price}</div>
-              <button onClick={() => actions.startCheckout(p.id)} disabled={disabled} style={{
-                padding: "8px 12px", borderRadius: 10, border: "none", cursor: disabled ? "default" : "pointer",
+              <button onClick={() => handleChoosePlan(p.id)} disabled={disabled || anyPaymentActionLoading} style={{
+                padding: "8px 12px", borderRadius: 10, border: "none", cursor: (disabled || anyPaymentActionLoading) ? "default" : "pointer",
                 background: active ? "var(--moss-600)" : disabled ? "var(--parchment-100)" : "var(--forest-900)",
                 color: active ? "#fff" : disabled ? "var(--bark-700)" : "var(--gold-500)",
                 fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, flexShrink: 0,
-                opacity: disabled && !active ? 0.7 : 1,
-              }}>{active ? "Active" : isLifetime && lifetimeExpired ? "Expired" : "Choose"}</button>
+                opacity: (disabled && !active) || (anyPaymentActionLoading && loadingPlanId !== p.id) ? 0.5 : 1,
+              }}>{loadingPlanId === p.id ? "Loading…" : active ? "Active" : isLifetime && lifetimeExpired ? "Expired" : "Choose"}</button>
             </div>
           );
         })}
@@ -2298,13 +2534,20 @@ function PlansPage({ state, actions }) {
       <SectionLabel label="Buy Sparks" icon={<Sparkles size={14} />} sub="Top up your Sparks balance for shiny skins and the AI Adviser" />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {SHINY_BUNDLES.map(b => (
-          <button key={b.id} onClick={() => state.authUser ? actions.startSparkCheckout(b.id) : actions.buySparkBundle(b.amount)} style={{
+          <button key={b.id} onClick={() => handleBuyBundle(b.id, b.amount)} disabled={anyPaymentActionLoading} style={{
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "14px 8px", borderRadius: 14,
-            border: "1px solid var(--parchment-100)", background: "var(--parchment-50)", cursor: "pointer", boxShadow: "var(--shadow-card)",
+            border: "1px solid var(--parchment-100)", background: "var(--parchment-50)", cursor: anyPaymentActionLoading ? "default" : "pointer",
+            boxShadow: "var(--shadow-card)", opacity: anyPaymentActionLoading && loadingBundleId !== b.id ? 0.5 : 1,
           }}>
-            <span style={{ fontSize: 20 }}>✨</span>
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: "var(--forest-900)" }}>{b.amount}</span>
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: "var(--moss-600)" }}>{b.price}</span>
+            {loadingBundleId === b.id ? (
+              <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--bark-700)", padding: "8px 0" }}>Loading…</span>
+            ) : (
+              <>
+                <span style={{ fontSize: 20 }}>✨</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 15, color: "var(--forest-900)" }}>{b.amount}</span>
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: "var(--moss-600)" }}>{b.price}</span>
+              </>
+            )}
           </button>
         ))}
       </div>
@@ -2354,8 +2597,9 @@ function PlansPage({ state, actions }) {
 function Paywall({ onClose, onSubscribe }) {
   const [selectedPlan, setSelectedPlan] = useState("yearly");
   const plan = PRO_PLANS.find(p => p.id === selectedPlan);
+  const paywallModalRef = useRef(null);
   return (
-    <Modal onClose={onClose}>
+    <Modal ref={paywallModalRef} onClose={onClose}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <Crown size={20} color="var(--gold-600)" />
         <h3 style={{ ...modalTitleStyle, margin: 0 }}>Grove Pro</h3>
@@ -2406,7 +2650,7 @@ function Paywall({ onClose, onSubscribe }) {
           </li>
         ))}
       </ul>
-      <button onClick={() => onSubscribe(selectedPlan)} style={primaryBtnStyle}>
+      <button onClick={() => { onSubscribe(selectedPlan); paywallModalRef.current?.requestClose(); }} style={primaryBtnStyle}>
         {plan.id === "lifetime" ? `Get lifetime access — ${plan.price}` : `Start Pro — ${plan.price}`}
       </button>
       <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center", marginTop: 8 }}>
@@ -2419,28 +2663,44 @@ function Paywall({ onClose, onSubscribe }) {
 /* -------------------------------------------------------------------------
    Shared modal + input styles
 ------------------------------------------------------------------------- */
-function Modal({ children, onClose }) {
+const Modal = React.forwardRef(function Modal({ children, onClose }, ref) {
+  const [closing, setClosing] = useState(false);
+
+  const handleClose = () => {
+    if (closing) return; // already closing — ignore extra clicks
+    setClosing(true);
+    setTimeout(onClose, 180); // matches the exit animation's duration below
+  };
+
+  useImperativeHandle(ref, () => ({ requestClose: handleClose }));
+
   return (
-    <div onClick={onClose} style={{
+    <div onClick={handleClose} style={{
       position: "fixed", inset: 0, background: "rgba(15,35,24,0.45)", zIndex: 50,
       display: "flex", alignItems: "flex-end", justifyContent: "center",
+      animation: closing ? "modal-backdrop-out .18s ease-in forwards" : "modal-backdrop-in .18s ease-out",
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         background: "var(--parchment-50)", borderRadius: "24px 24px 0 0", padding: "22px 20px 28px",
         width: "100%", maxWidth: 560, maxHeight: "80vh", overflowY: "auto",
-        animation: "modal-up .25s ease-out",
+        animation: closing ? "modal-down .18s ease-in forwards" : "modal-up .25s ease-out",
       }}>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ border: "none", background: "var(--parchment-100)", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button onClick={handleClose} style={{ border: "none", background: "var(--parchment-100)", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <X size={14} />
           </button>
         </div>
         {children}
-        <style>{`@keyframes modal-up { 0% { transform: translateY(30px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }`}</style>
+        <style>{`
+          @keyframes modal-up { 0% { transform: translateY(30px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+          @keyframes modal-down { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(30px); opacity: 0; } }
+          @keyframes modal-backdrop-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+          @keyframes modal-backdrop-out { 0% { opacity: 1; } 100% { opacity: 0; } }
+        `}</style>
       </div>
     </div>
   );
-}
+});
 
 const modalTitleStyle = { fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 20, color: "var(--forest-900)", margin: "0 0 14px" };
 const inputStyle = { width: "100%", padding: "12px 14px", borderRadius: 12, border: "1.5px solid var(--parchment-100)", fontFamily: "'Manrope', sans-serif", fontSize: 14, marginBottom: 12, outline: "none", boxSizing: "border-box" };
@@ -2489,6 +2749,8 @@ export default function GroveApp() {
   useFonts();
   const auth = useAuth();
   const [showQuoteOfDay, setShowQuoteOfDay] = useState(true);
+  const [checkoutCancelled, setCheckoutCancelled] = useState(false);
+  const quoteModalRef = useRef(null);
   const [page, setPage] = useState("tracker");
   const [detailHabitId, setDetailHabitId] = useState(null);
   const [pro, setPro] = useState(false);
@@ -2508,6 +2770,7 @@ export default function GroveApp() {
   const [proPlan, setProPlan] = useState(null); // 'monthly' | 'yearly' | 'lifetime' | null
   const [bonusCategory, setBonusCategoryState] = useState("social");
   const [confettiEnabled, setConfettiEnabled] = useState(true);
+  const [leaderboardHidden, setLeaderboardHidden] = useState(false);
   const [feedbackType, setFeedbackType] = useState("idea");
   const [feedbackDraft, setFeedbackDraft] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState([]);
@@ -2534,6 +2797,10 @@ export default function GroveApp() {
     if (params.get("checkout") === "success") {
       auth.refreshProfile();
       window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("checkout") === "cancelled") {
+      // No payment was taken — just let the person know clearly and clean the URL.
+      setCheckoutCancelled(true);
+      window.history.replaceState({}, "", window.location.pathname);
     }
   }, [auth.user]);
 
@@ -2551,7 +2818,7 @@ export default function GroveApp() {
   // Once signed in, if there's a stored referral code and this account hasn't
   // been attributed to anyone yet, credit the referrer for real via the server.
   useEffect(() => {
-    if (!auth.user || !auth.profile) return;
+    if (!auth.user || !auth.profile || !auth.session?.access_token) return;
     if (auth.profile.referred_by) return; // already attributed — never credit twice
     let storedRef = null;
     try { storedRef = window.localStorage.getItem("grove_referral_code"); } catch (err) {}
@@ -2561,8 +2828,11 @@ export default function GroveApp() {
       try {
         const res = await fetch("/api/credit-referral", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ newUserId: auth.user.id, referrerId: storedRef }),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${auth.session.access_token}`,
+          },
+          body: JSON.stringify({ referrerId: storedRef }),
         });
         const data = await res.json();
         if (data.success) {
@@ -2608,6 +2878,7 @@ export default function GroveApp() {
         if (data.proPlan !== undefined) setProPlan(data.proPlan);
         if (data.bonusCategory !== undefined) setBonusCategoryState(data.bonusCategory);
         if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
+        if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
         if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
         if (data.positive !== undefined) setPositive(data.positive);
         if (data.negative !== undefined) setNegative(data.negative);
@@ -2632,7 +2903,7 @@ export default function GroveApp() {
   useEffect(() => {
     if (!saveLoaded) return;
     const payload = {
-      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
+      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
       feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
       environment, sharedUpdates, plannerItems, placedItems,
     };
@@ -2647,7 +2918,7 @@ export default function GroveApp() {
     }, 500); // debounce so rapid changes (like dragging) don't spam saves
     return () => clearTimeout(t);
   }, [
-    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled,
+    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
     environment, sharedUpdates, plannerItems, placedItems,
   ]);
@@ -2710,6 +2981,8 @@ export default function GroveApp() {
       const countDone = (arr) => arr.filter(h => h.history[h.history.length - 1] === 1).length;
       const dailyBonus = (done) => total === 0 ? 0 : Math.max(0, 30 - 6 * (total - done));
       const before = dailyBonus(countDone(positive));
+      const habit = positive.find(h => h.id === id);
+      const wasDone = habit && habit.history[habit.history.length - 1] === 1;
       const newList = positive.map(h => {
         if (h.id !== id) return h;
         const history = h.history.slice();
@@ -2719,6 +2992,17 @@ export default function GroveApp() {
       const after = dailyBonus(countDone(newList));
       setPositive(newList);
       setPoints(p => Math.max(0, p + (after - before)));
+
+      // Completing a habit earns a small Spark and levels up its linked animal, if any.
+      // Symmetrically reversed if the same tick is undone right after (matches how
+      // the points bonus above already behaves) — this isn't a "missed day" penalty,
+      // just correcting an accidental double-tap.
+      const sparkDelta = wasDone ? -1 : 1;
+      if (auth.user) { auth.adjustSparks(sparkDelta); } else { setSparks(s => Math.max(0, s + sparkDelta)); }
+      if (habit?.animalId) {
+        const xpDelta = wasDone ? -15 : 15;
+        setPlacedItems(list => list.map(it => it.id === habit.animalId ? { ...it, xp: Math.max(0, (it.xp || 0) + xpDelta) } : it));
+      }
     },
     toggleToday: (id) => actions.toggleDay(id, isoDate(new Date())),
     toggleNegativeDay: (id, iso) => {
@@ -2743,7 +3027,7 @@ export default function GroveApp() {
     },
     addHabit: (kind, name) => {
       if (kind === "positive") {
-        setPositive(list => [...list, { id: "p" + Date.now(), name, history: new Array(HISTORY_LEN).fill(0) }]);
+        setPositive(list => [...list, { id: "p" + Date.now(), name, history: new Array(HISTORY_LEN).fill(0), why: "", goal: "", animalId: null }]);
       } else {
         setNegative(list => [...list, { id: "n" + Date.now(), name, target: 4, history: new Array(HISTORY_LEN).fill(0) }]);
       }
@@ -2752,10 +3036,12 @@ export default function GroveApp() {
       if (kind === "positive") setPositive(list => list.filter(h => h.id !== id));
       else setNegative(list => list.filter(h => h.id !== id));
     },
-    editHabit: (kind, id, name) => {
-      if (!name.trim()) return;
-      if (kind === "positive") setPositive(list => list.map(h => h.id === id ? { ...h, name: name.trim() } : h));
-      else setNegative(list => list.map(h => h.id === id ? { ...h, name: name.trim() } : h));
+    editHabit: (kind, id, updates) => {
+      // Backward compatible: a plain string still just renames, same as before.
+      const patch = typeof updates === "string" ? { name: updates } : updates;
+      if (!patch.name?.trim() && patch.name !== undefined) return;
+      if (kind === "positive") setPositive(list => list.map(h => h.id === id ? { ...h, ...patch, name: (patch.name ?? h.name).trim() } : h));
+      else setNegative(list => list.map(h => h.id === id ? { ...h, ...patch, name: (patch.name ?? h.name).trim() } : h));
     },
     setNegativeTarget: (id, target) => {
       setNegative(list => list.map(h => h.id === id ? { ...h, target } : h));
@@ -2782,6 +3068,7 @@ export default function GroveApp() {
           x: pos.x, y: pos.y,
           roamDistance: 18 + Math.random() * 22,
           roamDuration: 4.5 + Math.random() * 3,
+          name: null, xp: item.type === "animal" ? 0 : undefined,
         };
       };
       // remove an item and anything that lives on it, recursively (pond -> lily pad -> frog, tree -> sloth, etc.)
@@ -2855,6 +3142,9 @@ export default function GroveApp() {
     movePlacedItem: (id, x, y) => {
       setPlacedItems(list => list.map(it => it.id === id ? { ...it, x, y } : it));
     },
+    renameAnimal: (id, name) => {
+      setPlacedItems(list => list.map(it => it.id === id ? { ...it, name: name.trim().slice(0, 24) } : it));
+    },
     congratulate: (id) => {
       setFriends(list => list.map(f => f.id === id ? { ...f, kudos: f.kudos + 1 } : f));
     },
@@ -2863,7 +3153,8 @@ export default function GroveApp() {
       // signed out — local demo fallback so the feature is still testable without an account
       setFlowers(f => Math.min(1, f + 1));
     },
-    subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); },
+    subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); }, // kept for any other callers
+    applySubscription: (planId) => { setPro(true); setProPlan(planId || "monthly"); }, // no instant close — used with the animated modal close
     shareProgress: (text) => {
       setSharedUpdates(list => [...list, { id: Date.now(), text }]);
     },
@@ -2883,9 +3174,11 @@ export default function GroveApp() {
       }));
     },
     setConfettiEnabled: (val) => setConfettiEnabled(val),
+    setLeaderboardHidden: (val) => setLeaderboardHidden(val),
     openResetConfirm: () => setShowResetConfirm(true),
     closeResetConfirm: () => setShowResetConfirm(false),
-    confirmReset: () => { resetGrove(); setShowResetConfirm(false); },
+    confirmReset: () => { resetGrove(); setShowResetConfirm(false); }, // kept for any other callers
+    performReset: () => { resetGrove(); }, // reset without also instantly closing — used with the animated modal close
     openFeedback: () => setShowFeedback(true),
     closeFeedback: () => { setShowFeedback(false); setFeedbackDraft(""); },
     setFeedbackType: (t) => setFeedbackType(t),
@@ -2950,12 +3243,15 @@ export default function GroveApp() {
       setProPlan(planId);
     },
     startCheckout: async (planId) => {
-      if (!auth.user) return;
+      if (!auth.user || !auth.session?.access_token) return;
       try {
         const res = await fetch("/api/create-checkout-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId, userId: auth.user.id, email: auth.user.email }),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${auth.session.access_token}`,
+          },
+          body: JSON.stringify({ planId }),
         });
         const data = await res.json();
         if (data.url) {
@@ -2968,15 +3264,17 @@ export default function GroveApp() {
       }
     },
     manageSubscription: async () => {
-      if (!auth.user || !auth.profile?.stripe_customer_id) {
-        alert("No subscription found for this account yet.");
+      if (!auth.user || !auth.session?.access_token) {
+        alert("Please sign in first.");
         return;
       }
       try {
         const res = await fetch("/api/create-portal-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customerId: auth.profile.stripe_customer_id }),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${auth.session.access_token}`,
+          },
         });
         const data = await res.json();
         if (data.url) {
@@ -2997,12 +3295,15 @@ export default function GroveApp() {
       setSparks(s => s + amount);
     },
     startSparkCheckout: async (bundleId) => {
-      if (!auth.user) return;
+      if (!auth.user || !auth.session?.access_token) return;
       try {
         const res = await fetch("/api/create-checkout-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bundleId, userId: auth.user.id, email: auth.user.email }),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${auth.session.access_token}`,
+          },
+          body: JSON.stringify({ bundleId }),
         });
         const data = await res.json();
         if (data.url) {
@@ -3023,6 +3324,7 @@ export default function GroveApp() {
       setSparks(s => s + amount);
     },
     signInWithEmail: (email) => auth.signInWithEmail(email),
+    dismissCheckoutCancelled: () => setCheckoutCancelled(false),
     signOut: () => auth.signOut(),
   };
 
@@ -3043,16 +3345,26 @@ export default function GroveApp() {
     page, pro: effectivePro, points, flowers: effectiveFlowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
     unlocked, hiddenFeatureIds, unlockedEnvs, environment, placedItems, fogLevel,
     sharedUpdates, plannerItems,
-    showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled,
+    showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled, leaderboardHidden,
     lifetimeOfferExpiresAt, proPlan: effectiveProPlan,
-    authUser: auth.user, authLoading: auth.loading, hasStripeCustomer: !!auth.profile?.stripe_customer_id,
+    authUser: auth.user, authLoading: auth.loading, hasStripeCustomer: !!auth.profile?.stripe_customer_id, checkoutCancelled,
   };
 
   const detailHabit = positiveDerived.find(h => h.id === detailHabitId);
 
   return (
     <>
-      <style>{`html { scrollbar-gutter: stable; overflow-y: scroll; }`}</style>
+      <style>{`
+        html { scrollbar-gutter: stable; overflow-y: scroll; }
+        button:not(:disabled) { transition: filter .12s ease, transform .08s ease; }
+        button:not(:disabled):hover { filter: brightness(1.07); }
+        button:not(:disabled):active { transform: scale(0.96); filter: brightness(0.97); }
+        @keyframes grove-page-fade { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 1; transform: translateY(0); } }
+        @media (prefers-reduced-motion: reduce) {
+          button:not(:disabled) { transition: none; }
+          button:not(:disabled):active { transform: none; }
+        }
+      `}</style>
       <div style={{
         "--forest-950":"#0f2318", "--forest-900":"#153826", "--forest-800":"#1b4332",
         "--moss-600":"#52796f", "--moss-400":"#84a98c", "--gold-500":"#e9c46a",
@@ -3066,16 +3378,16 @@ export default function GroveApp() {
       {detailHabit ? (
         <HabitDetail habit={detailHabit} onBack={actions.closeHabitDetail} />
       ) : (
-        <>
+        <div key={page} style={{ animation: "grove-page-fade .18s ease-out" }}>
           {page === "tracker" && <HabitTracker state={state} actions={actions} />}
           {page === "grove" && <TheGrove state={state} actions={actions} />}
           {page === "stats" && <StatsPage state={state} actions={actions} />}
           {page === "planner" && <Planner state={state} actions={actions} />}
           {page === "plans" && <PlansPage state={state} actions={actions} />}
-        </>
+        </div>
       )}
       <TabBar page={page} setPage={setPage} />
-      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={actions.subscribe} />}
+      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={actions.applySubscription} />}
 
       {/* invisible tap zone — tap 7 times fast to reveal Creator Mode; nothing shows here otherwise */}
       <div onClick={handleSecretTap} style={{
@@ -3107,7 +3419,7 @@ export default function GroveApp() {
       )}
 
       {showQuoteOfDay && (
-        <Modal onClose={() => setShowQuoteOfDay(false)}>
+        <Modal ref={quoteModalRef} onClose={() => setShowQuoteOfDay(false)}>
           <div style={{
             textAlign: "center", padding: "10px 4px 4px",
           }}>
@@ -3128,7 +3440,7 @@ export default function GroveApp() {
             <p style={{
               fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--moss-600)", margin: "0 0 18px",
             }}>— {dailyQuoteOfDay().author}</p>
-            <button onClick={() => setShowQuoteOfDay(false)} style={primaryBtnStyle}>Into the grove</button>
+            <button onClick={() => quoteModalRef.current?.requestClose()} style={primaryBtnStyle}>Into the grove</button>
           </div>
         </Modal>
       )}
