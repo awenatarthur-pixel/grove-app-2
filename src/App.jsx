@@ -351,6 +351,11 @@ const SHINY_BUNDLES = [
   { id: "b24", amount: 24, price: "£4.99" },
 ];
 const AI_ADVISER_COST = 3;
+// Launch switches. Sparks (the second currency) and the AI Adviser are hidden for launch.
+// Flip SPARKS_ENABLED to true to bring Sparks back; the AI Adviser also needs a server function first.
+const SPARKS_ENABLED = false;
+const AI_ADVISER_ENABLED = false;
+const SHINY_POINT_COST = 300; // shiny skins are bought with points while Sparks are off
 const LIFETIME_OFFER_MS = 60 * 1000;
 
 /* -------------------------------------------------------------------------
@@ -937,7 +942,7 @@ function TheGrove({ state, actions }) {
     <div style={{ paddingBottom: 100 }}>
       <TopBar title="The Grove" right={
         <div style={{ display: "flex", gap: 6 }}>
-          <SparksPill sparks={state.sparks} />
+          {SPARKS_ENABLED && <SparksPill sparks={state.sparks} />}
           <PointsPill points={state.points} />
         </div>
       } />
@@ -1631,7 +1636,7 @@ function TheGrove({ state, actions }) {
         <Modal onClose={() => setShinyOpen(false)}>
           <h3 style={modalTitleStyle}>Shiny skins</h3>
           <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", margin: "-8px 0 12px" }}>
-            Give an animal you own a shimmering opposite-colored variant, paid for in Sparks — earned by completing your daily challenge (max 1 a day).
+            Give an animal you own a shimmering opposite-colored variant, {SPARKS_ENABLED ? "paid for in Sparks — earned by completing your daily challenge (max 1 a day)." : `bought with points (${SHINY_POINT_COST} each).`}
           </p>
           {(() => {
             const ownedAnimals = SHOP_ITEMS.filter(i => i.type === "animal" && i.world === currentWorld && state.unlocked.includes(i.id));
@@ -1641,7 +1646,8 @@ function TheGrove({ state, actions }) {
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {ownedAnimals.map(a => {
-                  const oppositeCost = 6;
+                  const oppositeCost = SPARKS_ENABLED ? 6 : SHINY_POINT_COST;
+                  const balance = SPARKS_ENABLED ? state.sparks : state.points;
                   const hasOpposite = state.shinyUnlocked.includes(a.id);
                   const isOn = hasOpposite && !state.shinyHidden.includes(a.id);
                   return (
@@ -1670,13 +1676,13 @@ function TheGrove({ state, actions }) {
                           {isOn ? "Shiny on" : "Shiny off"}
                         </button>
                       ) : (
-                        <button onClick={() => actions.buyShiny(a.id, oppositeCost)} disabled={state.sparks < oppositeCost} style={{
+                        <button onClick={() => actions.buyShiny(a.id, oppositeCost)} disabled={balance < oppositeCost} style={{
                           padding: "7px 11px", borderRadius: 10, border: "none",
-                          cursor: state.sparks < oppositeCost ? "default" : "pointer",
+                          cursor: balance < oppositeCost ? "default" : "pointer",
                           background: "var(--forest-900)", color: "var(--gold-500)",
                           fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12,
-                          opacity: state.sparks < oppositeCost ? 0.5 : 1,
-                        }}>✨ {oppositeCost}</button>
+                          opacity: balance < oppositeCost ? 0.5 : 1,
+                        }}>{SPARKS_ENABLED ? `✨ ${oppositeCost}` : `${oppositeCost} pts`}</button>
                       )}
                     </div>
                   );
@@ -2214,7 +2220,7 @@ function StatsPage({ state, actions }) {
         )}
       </div>
 
-      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub="A small daily push, your pick of focus — optional, +15 pts + 1 Spark" />
+      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub={SPARKS_ENABLED ? "A small daily push, your pick of focus — optional, +15 pts + 1 Spark" : "A small daily push, your pick of focus — optional, +15 pts"} />
       <div style={{ padding: "0 20px 4px" }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           {Object.entries(BONUS_CATEGORIES).map(([key, cat]) => (
@@ -2557,7 +2563,7 @@ function PlansPage({ state, actions }) {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <TopBar title="Plans" right={<SparksPill sparks={state.sparks} />} />
+      <TopBar title="Plans" right={SPARKS_ENABLED ? <SparksPill sparks={state.sparks} /> : null} />
 
       <div style={{ padding: "0 20px" }}>
         {state.checkoutCancelled && (
@@ -2633,6 +2639,8 @@ function PlansPage({ state, actions }) {
         </p>
       </div>
 
+      {SPARKS_ENABLED && (
+      <>
       <SectionLabel label="Buy Sparks" icon={<Sparkles size={14} />} sub="Top up your Sparks balance for shiny skins and the AI Adviser" />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {SHINY_BUNDLES.map(b => (
@@ -2657,6 +2665,11 @@ function PlansPage({ state, actions }) {
         {state.authUser ? "Secure checkout via Stripe." : "Sign in above for a real purchase — tapping a bundle while signed out just credits Sparks for local testing."}
       </p>
 
+      </>
+      )}
+
+      {AI_ADVISER_ENABLED && (
+      <>
       <SectionLabel label="AI Adviser" icon={<Sparkles size={14} />} sub={`${AI_ADVISER_COST} Sparks per message`} />
       <div style={{ padding: "0 20px" }}>
         <div style={{ background: "var(--parchment-50)", borderRadius: 16, boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
@@ -2692,6 +2705,8 @@ function PlansPage({ state, actions }) {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -3100,7 +3115,9 @@ export default function GroveApp() {
       // the points bonus above already behaves) — this isn't a "missed day" penalty,
       // just correcting an accidental double-tap.
       const sparkDelta = wasDone ? -1 : 1;
-      if (auth.user) { auth.adjustSparks(sparkDelta); } else { setSparks(s => Math.max(0, s + sparkDelta)); }
+      if (SPARKS_ENABLED) {
+        if (auth.user) { auth.adjustSparks(sparkDelta); } else { setSparks(s => Math.max(0, s + sparkDelta)); }
+      }
       if (habit?.animalId) {
         const xpDelta = wasDone ? -15 : 15;
         setPlacedItems(list => list.map(it => it.id === habit.animalId ? { ...it, xp: Math.max(0, (it.xp || 0) + xpDelta) } : it));
@@ -3295,6 +3312,7 @@ export default function GroveApp() {
       const next = !bonusDone;
       setBonusDone(next);
       setPoints(p => Math.max(0, p + (next ? 15 : -15)));
+      if (!SPARKS_ENABLED) return;
       if (next) {
         if (lastSparkDate !== today) {
           setSparks(s => s + 1);
@@ -3329,8 +3347,16 @@ export default function GroveApp() {
       if (auth.user) { auth.adjustFlowers(1); } else { setFlowers(f => f + 1); }
     },
     buyShiny: (shopId, cost) => {
+      if (shinyUnlocked.includes(shopId)) return;
+      if (!SPARKS_ENABLED) {
+        // Launch mode: shiny skins cost points instead of Sparks.
+        if (points < cost) return;
+        setPoints(p => Math.max(0, p - cost));
+        setShinyUnlocked(list => [...list, shopId]);
+        return;
+      }
       const currentSparks = auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks;
-      if (shinyUnlocked.includes(shopId) || currentSparks < cost) return;
+      if (currentSparks < cost) return;
       if (auth.user) { auth.adjustSparks(-cost); } else { setSparks(s => Math.max(0, s - cost)); }
       setShinyUnlocked(list => [...list, shopId]);
     },
