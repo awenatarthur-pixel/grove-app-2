@@ -1,13 +1,405 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>grove-app</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Grove — Grow real habits, one living world at a time</title>
+<meta name="description" content="Grove turns your daily habits into a living, growing world. Track what you build and break, watch a grove come alive, and unlock rainforests and underwater caves as you go." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --forest-950:#0f2318; --forest-900:#153826; --forest-800:#1b4332;
+    --moss-600:#52796f; --moss-400:#84a98c;
+    --gold-500:#e9c46a; --gold-600:#d4a84a;
+    --blush-400:#f4a896; --blush-500:#ec8a72;
+    --parchment-50:#faf6ee; --parchment-100:#f2ecdd;
+    --bark-700:#6b4423; --bark-900:#3f2a17;
+    --shadow-soft: 0 20px 60px rgba(15,35,24,0.16);
+    --shadow-card: 0 2px 14px rgba(15,35,24,0.08);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--parchment-50); color: var(--forest-900);
+    font-family: 'Manrope', sans-serif; -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: 'Fraunces', serif; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  p { line-height: 1.55; }
+  a { color: inherit; }
+  img, svg { display: block; max-width: 100%; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* nav */
+  .nav {
+    position: sticky; top: 0; z-index: 50; background: rgba(250,246,238,0.85);
+    backdrop-filter: blur(10px); border-bottom: 1px solid rgba(107,68,35,0.08);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; max-width: 1120px; margin: 0 auto; }
+  .brand { display: flex; align-items: center; gap: 8px; font-family: 'Fraunces', serif; font-weight: 700; font-size: 19px; }
+  .nav-cta {
+    background: var(--forest-900); color: var(--gold-500); border: none; border-radius: 999px;
+    padding: 10px 20px; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 14px;
+    cursor: pointer; text-decoration: none; display: inline-block;
+  }
+
+  /* hero */
+  .hero { padding: 64px 24px 40px; }
+  .hero-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 56px; align-items: center; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px; background: rgba(233,196,106,0.22);
+    color: var(--gold-600); padding: 6px 14px; border-radius: 999px; font-weight: 800; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px;
+  }
+  .hero h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.06; margin-bottom: 20px; }
+  .hero h1 em { font-style: normal; color: var(--moss-600); }
+  .hero p.lede { font-size: 18px; color: var(--bark-700); max-width: 480px; margin-bottom: 32px; }
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .btn-primary {
+    background: var(--forest-900); color: var(--gold-500); border: none; border-radius: 14px;
+    padding: 16px 28px; font-family: 'Manrope', sans-serif; font-weight: 800; font-size: 16px;
+    cursor: pointer; text-decoration: none; display: inline-block; box-shadow: var(--shadow-soft);
+  }
+  .btn-secondary {
+    background: transparent; color: var(--forest-900); border: 1.5px solid rgba(107,68,35,0.2); border-radius: 14px;
+    padding: 15px 26px; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 15px;
+    cursor: pointer; text-decoration: none; display: inline-block;
+  }
+  .hero-note { margin-top: 18px; font-size: 13px; color: var(--bark-700); }
+
+  /* hero grove scene, the signature element */
+  .scene {
+    position: relative; border-radius: 28px; overflow: hidden; height: 420px;
+    background: linear-gradient(180deg, #bfe3c9 0%, #eef7d8 55%, #d9cf9e 100%);
+    box-shadow: var(--shadow-soft);
+  }
+  .scene .sun {
+    position: absolute; top: 26px; right: 34px; width: 56px; height: 56px; border-radius: 50%;
+    background: radial-gradient(circle, #fff4cf, var(--gold-500));
+  }
+  .scene .cloud { position: absolute; opacity: 0.85; animation: drift 40s linear infinite; }
+  .scene .cloud div { position: absolute; background: rgba(255,255,255,0.8); border-radius: 50%; }
+  @keyframes drift { from { transform: translateX(-60px); } to { transform: translateX(480px); } }
+  .scene .ground { position: absolute; bottom: 0; left: 0; right: 0; height: 44%; background: linear-gradient(180deg, #8fbf7a, #6fa363); }
+  .scene .tree {
+    position: absolute; bottom: 8%; font-size: 76px; transform-origin: bottom center;
+    animation: sway 4.5s ease-in-out infinite;
+  }
+  @keyframes sway { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+  .scene .fox { position: absolute; bottom: 10%; font-size: 40px; animation: roam 6s ease-in-out infinite; }
+  @keyframes roam { 0%,100% { transform: translateX(-16px) scaleX(-1); } 50% { transform: translateX(16px) scaleX(1); } }
+  .scene .firefly {
+    position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #f4e98a;
+    box-shadow: 0 0 8px 3px rgba(244,233,138,0.85); animation: twinkle 2.4s ease-in-out infinite;
+  }
+  @keyframes twinkle { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+  .scene .dragon { position: absolute; bottom: 14%; right: 8%; font-size: 40px; animation: hop 2.6s ease-in-out infinite; }
+  @keyframes hop { 0%,60%,100% { transform: translateY(0); } 80% { transform: translateY(-6px); } }
+
+  /* sections */
+  section { padding: 88px 24px; }
+  .section-head { max-width: 620px; margin: 0 auto 52px; text-align: center; }
+  .section-head .eyebrow { display: inline-flex; }
+  .section-head h2 { font-size: clamp(28px, 4vw, 38px); margin-bottom: 12px; }
+  .section-head p { color: var(--bark-700); font-size: 16px; }
+
+  /* features */
+  .features { background: var(--forest-900); color: var(--parchment-50); }
+  .features .section-head h2 { color: var(--parchment-50); }
+  .features .section-head p { color: rgba(250,246,238,0.72); }
+  .feature-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .feature-card {
+    background: rgba(250,246,238,0.06); border: 1px solid rgba(250,246,238,0.12); border-radius: 20px; padding: 28px;
+  }
+  .feature-card .icon { font-size: 30px; margin-bottom: 16px; }
+  .feature-card h3 { font-size: 18px; color: var(--gold-500); margin-bottom: 8px; }
+  .feature-card p { font-size: 14px; color: rgba(250,246,238,0.75); margin: 0; }
+
+  /* worlds */
+  .worlds-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .world-card { border-radius: 22px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .world-swatch { height: 140px; }
+  .world-body { background: var(--parchment-50) ; padding: 22px; }
+  .world-body h3 { font-size: 17px; margin-bottom: 6px; }
+  .world-body p { font-size: 13px; color: var(--bark-700); margin: 0; }
+  .world-meadow { background: linear-gradient(160deg, #bfe3c9, #8fbf7a); }
+  .world-rainforest { background: linear-gradient(160deg, #1d4a34, #5f9e5c); }
+  .world-cave { background: linear-gradient(160deg, #0a3244, #1f7a86); }
+
+  /* pricing */
+  .pricing-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .price-card {
+    background: var(--parchment-50); border: 1.5px solid var(--parchment-100); border-radius: 20px;
+    padding: 26px 22px; box-shadow: var(--shadow-card); display: flex; flex-direction: column;
+  }
+  .price-card.featured { border-color: var(--gold-600); background: rgba(233,196,106,0.1); }
+  .price-card .tag {
+    display: inline-block; background: rgba(233,196,106,0.25); color: var(--gold-600); font-weight: 800;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 9px; border-radius: 999px; margin-bottom: 10px;
+    width: fit-content;
+  }
+  .price-card h3 { font-size: 16px; margin-bottom: 4px; }
+  .price-card .price { font-family: 'Fraunces', serif; font-weight: 600; font-size: 30px; margin: 6px 0 4px; }
+  .price-card .sub { font-size: 12px; color: var(--bark-700); margin-bottom: 18px; }
+  .price-card ul { list-style: none; padding: 0; margin: 0 0 20px; font-size: 13px; color: var(--bark-700); }
+  .price-card li { margin-bottom: 6px; padding-left: 18px; position: relative; }
+  .price-card li::before { content: "✓"; position: absolute; left: 0; color: var(--moss-600); font-weight: 700; }
+
+  /* final cta */
+  .final-cta {
+    background: linear-gradient(135deg, var(--forest-800), var(--moss-600));
+    color: var(--parchment-50); text-align: center; border-radius: 32px; max-width: 1120px; margin: 0 auto;
+    padding: 72px 32px;
+  }
+  .final-cta h2 { color: var(--parchment-50); font-size: clamp(28px, 4vw, 40px); margin-bottom: 16px; }
+  .final-cta p { color: rgba(250,246,238,0.8); max-width: 460px; margin: 0 auto 32px; }
+  .waitlist-form {
+    display: flex; gap: 10px; max-width: 420px; margin: 0 auto; flex-wrap: wrap; justify-content: center;
+  }
+  .waitlist-form input[type="email"] {
+    flex: 1; min-width: 220px; padding: 15px 18px; border-radius: 14px; border: none;
+    font-family: 'Manrope', sans-serif; font-size: 15px; outline: none;
+  }
+  .waitlist-form button {
+    background: var(--gold-500); color: var(--bark-900); border: none; border-radius: 14px;
+    padding: 15px 24px; font-family: 'Manrope', sans-serif; font-weight: 800; font-size: 15px; cursor: pointer;
+  }
+  .waitlist-note { font-size: 12px; color: rgba(250,246,238,0.65); margin-top: 14px; }
+  .waitlist-success {
+    display: none; background: rgba(255,255,255,0.12); border-radius: 14px; padding: 16px 20px;
+    max-width: 420px; margin: 0 auto; font-weight: 700;
+  }
+
+  footer { padding: 40px 24px 60px; text-align: center; color: var(--bark-700); font-size: 13px; }
+
+  @media (max-width: 860px) {
+    .hero-inner { grid-template-columns: 1fr; }
+    .feature-grid, .worlds-grid { grid-template-columns: 1fr; }
+    .pricing-grid { grid-template-columns: 1fr 1fr; }
+    .scene { height: 320px; order: -1; }
+  }
+  @media (max-width: 520px) {
+    .pricing-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scene .tree, .scene .fox, .scene .firefly, .scene .dragon, .scene .cloud { animation: none !important; }
+  }
+  :focus-visible { outline: 3px solid var(--gold-600); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="brand">🌱 Grove</div>
+    <a class="nav-cta" href="https://grove-app-2.vercel.app/">Start growing</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <div class="eyebrow">✨ Habit tracking, reimagined</div>
+      <h1>Every habit you keep <em>grows something real.</em></h1>
+      <p class="lede">Grove turns your daily habits into a living world. Tick a habit, watch a tree grow. Skip too many, and the fog rolls in. It's the only tracker where your progress actually looks like something.</p>
+      <div class="cta-row">
+        <a class="btn-primary" href="https://grove-app-2.vercel.app/">Start growing — free</a>
+        <a class="btn-secondary" href="#features">See how it works</a>
+      </div>
+      <div class="hero-note">Free forever for 3 habits · Pro from £4/month</div>
+    </div>
+    <div class="scene" aria-hidden="true">
+      <div class="sun"></div>
+      <div class="cloud" style="top:18%; left:10%;"><div style="width:50px;height:26px;border-radius:50%;"></div><div style="width:30px;height:20px;left:24px;top:-8px;border-radius:50%;"></div></div>
+      <span class="firefly" style="top:34%; left:20%;"></span>
+      <span class="firefly" style="top:44%; left:70%; animation-delay: .8s;"></span>
+      <span class="firefly" style="top:30%; left:55%; animation-delay: 1.4s;"></span>
+      <div class="ground"></div>
+      <div class="tree" style="left:14%;">🌳</div>
+      <div class="tree" style="left:56%; font-size:56px; animation-delay: 1s;">🌳</div>
+      <div class="fox">🦊</div>
+      <div class="dragon">🐲</div>
+    </div>
+  </div>
+</header>
+
+<section id="features" class="features">
+  <div class="section-head">
+    <div class="eyebrow">What's inside</div>
+    <h2>A tracker that feels like a place, not a chore</h2>
+    <p>Every part of Grove exists to make consistency feel worth showing up for.</p>
+  </div>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="icon">🌳</div>
+      <h3>Habits to grow, habits to break</h3>
+      <p>Tick off what you're building. Track what you're cutting back on — miss too many days and the fog rolls in.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🦊</div>
+      <h3>A grove that's actually alive</h3>
+      <p>Trees, animals, a flowing stream, drifting fireflies — pet them, drag them anywhere, watch them react.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🐙</div>
+      <h3>Whole worlds to unlock</h3>
+      <p>Meadow, misty forest, a dense rainforest, an underwater cave — each with its own shop and creatures.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🏆</div>
+      <h3>Animals that grow with you</h3>
+      <p>Name your animals, link them to a habit, and watch them level up as you stay consistent.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎯</div>
+      <h3>A daily challenge that matters</h3>
+      <p>Pick a focus — social confidence, mindfulness, or discipline — for one small push a day.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🐲</div>
+      <h3>See your progress</h3>
+      <p>Streaks, consistency and recovery stats show how your habits are really going.</p>
+    </div>
+  </div>
+</section>
+
+<section id="worlds">
+  <div class="section-head">
+    <div class="eyebrow">Three worlds</div>
+    <h2>Your grove doesn't have to stay a meadow</h2>
+    <p>Keep your streaks up and unlock entirely new places to grow.</p>
+  </div>
+  <div class="worlds-grid">
+    <div class="world-card">
+      <div class="world-swatch world-meadow"></div>
+      <div class="world-body">
+        <h3>🌾 Meadow, Misty Forest & Sunset Cliffs</h3>
+        <p>Trees, a fox, a pond, a flowing stream — the grove you start with.</p>
+      </div>
+    </div>
+    <div class="world-card">
+      <div class="world-swatch world-rainforest"></div>
+      <div class="world-body">
+        <h3>🌴 Rainforest</h3>
+        <p>A chameleon, a sloth in the canopy, Venus fly traps, and rain on demand.</p>
+      </div>
+    </div>
+    <div class="world-card">
+      <div class="world-swatch world-cave"></div>
+      <div class="world-body">
+        <h3>🐙 Underwater Cave</h3>
+        <p>Coral, a school of fish, an octopus, and a treasure chest spilling gold.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="section-head">
+    <div class="eyebrow">Pricing</div>
+    <h2>Free to start. Cheap to go further.</h2>
+    <p>Three habits, forever, at no cost. Upgrade whenever you're ready for more.</p>
+  </div>
+  <div class="pricing-grid">
+    <div class="price-card">
+      <span class="tag">Free</span>
+      <h3>Grove</h3>
+      <div class="price">£0</div>
+      <div class="sub">forever</div>
+      <ul>
+        <li>3 habits to grow</li>
+        <li>2 habits to break</li>
+        <li>The full grove, all worlds</li>
+      </ul>
+    </div>
+    <div class="price-card">
+      <span class="tag">Monthly</span>
+      <h3>Grove Pro</h3>
+      <div class="price">£4</div>
+      <div class="sub">per month</div>
+      <ul>
+        <li>Unlimited habits</li>
+        <li>Journal & progress insights</li>
+        <li>More planner slots</li>
+      </ul>
+    </div>
+    <div class="price-card featured">
+      <span class="tag">Best value</span>
+      <h3>Grove Pro Yearly</h3>
+      <div class="price">£32</div>
+      <div class="sub">per year</div>
+      <ul>
+        <li>Everything in Pro</li>
+        <li>Works out to £2.67/month</li>
+        <li>Cancel any time</li>
+      </ul>
+    </div>
+    <div class="price-card">
+      <span class="tag">First minute only</span>
+      <h3>Lifetime</h3>
+      <div class="price">£30</div>
+      <div class="sub">one-time</div>
+      <ul>
+        <li>Pay once, own it forever</li>
+        <li>A limited-time offer in-app</li>
+        <li>No recurring charge, ever</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="waitlist">
+  <div class="final-cta">
+    <h2>Grow something real.</h2>
+    <p>Grove is live — it takes about ten seconds to plant your first habit.</p>
+    <a class="btn-primary" href="https://grove-app-2.vercel.app/" style="display:inline-block; margin-bottom: 28px;">Start growing — free</a>
+
+    <p style="font-size: 13px; opacity: 0.75; margin-bottom: 12px;">Not ready to dive in? Get an email when we add accounts and syncing.</p>
+    <form class="waitlist-form" id="waitlistForm" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+      <input type="email" name="email" placeholder="you@email.com" required aria-label="Email address" />
+      <button type="submit">Notify me</button>
+    </form>
+    <div class="waitlist-success" id="waitlistSuccess">🌱 You're on the list — we'll be in touch.</div>
+    <p class="waitlist-note">No spam. One email, when it's ready.</p>
+  </div>
+</section>
+
+<footer>
+  © Grove. Made for people who'd rather grow a world than check a box.
+  <br /><a href="terms.html" style="color: inherit;">Terms</a> · <a href="privacy.html" style="color: inherit;">Privacy</a>
+</footer>
+
+<script>
+  const form = document.getElementById('waitlistForm');
+  const success = document.getElementById('waitlistSuccess');
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const button = form.querySelector('button');
+    const originalText = button.textContent;
+    button.textContent = 'Joining…';
+    button.disabled = true;
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { 'Accept': 'application/json' },
+      });
+      if (response.ok) {
+        form.style.display = 'none';
+        success.style.display = 'block';
+      } else {
+        button.textContent = originalText;
+        button.disabled = false;
+        alert('Something went wrong — please try again.');
+      }
+    } catch (err) {
+      button.textContent = originalText;
+      button.disabled = false;
+      alert('Something went wrong — please try again.');
+    }
+  });
+</script>
+
+</body>
 </html>
