@@ -66,6 +66,30 @@ function lastNDates(n, endDate) {
   }
   return arr;
 }
+// --- Day rollover -------------------------------------------------------
+// Each habit's history is a fixed-length list whose LAST entry means "today". Nothing in the list
+// records which calendar day that is, so when a new day starts the list has to be shifted left
+// (yesterday becomes the second-to-last entry, today starts empty). We remember the day the data
+// was last aligned to (the "anchor") and shift by however many days have passed since.
+function localDayKey(d) {
+  const x = d || new Date();
+  return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+}
+function daysBetweenKeys(fromKey, toKey) {
+  const [fy, fm, fd] = fromKey.split("-").map(Number);
+  const [ty, tm, td] = toKey.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+function shiftHistory(history, days) {
+  if (!history || days <= 0) return history;
+  const len = history.length;
+  if (days >= len) return new Array(len).fill(0);
+  return history.slice(days).concat(new Array(days).fill(0));
+}
+function shiftHabitList(list, days) {
+  return (list || []).map(h => ({ ...h, history: shiftHistory(h.history, days) }));
+}
+
 function seededHistory(len, weight, forceLast) {
   const arr = [];
   for (let i = 0; i < len; i++) arr.push(Math.random() < weight ? 1 : 0);
@@ -2885,6 +2909,8 @@ export default function GroveApp() {
   const [bonusDone, setBonusDone] = useState(false);
   const [lastSparkDate, setLastSparkDate] = useState(null);
   const [lifetimeOfferExpiresAt, setLifetimeOfferExpiresAt] = useState(null);
+  const [historyAnchor, setHistoryAnchor] = useState(localDayKey());
+  const historyAnchorRef = useRef(historyAnchor);
   const [proPlan, setProPlan] = useState(null); // 'monthly' | 'yearly' | 'lifetime' | null
   const [bonusCategory, setBonusCategoryState] = useState("social");
   const [confettiEnabled, setConfettiEnabled] = useState(true);
@@ -2990,7 +3016,7 @@ export default function GroveApp() {
         if (data.sparks !== undefined) setSparks(data.sparks);
         if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
         if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
-        if (data.bonusDone !== undefined) setBonusDone(data.bonusDone);
+        if (data.bonusDone !== undefined && !(data.historyAnchor && daysBetweenKeys(data.historyAnchor, localDayKey()) > 0)) setBonusDone(data.bonusDone);
         if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
         if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
         if (data.proPlan !== undefined) setProPlan(data.proPlan);
@@ -2998,6 +3024,16 @@ export default function GroveApp() {
         if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
         if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
         if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
+        // New day(s) since this was saved? Roll the histories forward so 'today' is empty again.
+        const todayKey = localDayKey();
+        const missedDays = data.historyAnchor ? daysBetweenKeys(data.historyAnchor, todayKey) : 0;
+        if (missedDays > 0) {
+          if (data.positive) data.positive = shiftHabitList(data.positive, missedDays);
+          if (data.negative) data.negative = shiftHabitList(data.negative, missedDays);
+          setBonusDone(false);
+        }
+        setHistoryAnchor(todayKey);
+        historyAnchorRef.current = todayKey;
         if (data.positive !== undefined) setPositive(data.positive);
         if (data.negative !== undefined) setNegative(data.negative);
         if (data.friends !== undefined) setFriends(data.friends);
@@ -3023,7 +3059,7 @@ export default function GroveApp() {
     const payload = {
       pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
       feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-      environment, sharedUpdates, plannerItems, placedItems,
+      environment, sharedUpdates, plannerItems, placedItems, historyAnchor,
     };
     setSaveStatus("saving");
     const t = setTimeout(async () => {
@@ -3038,8 +3074,28 @@ export default function GroveApp() {
   }, [
     saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-    environment, sharedUpdates, plannerItems, placedItems,
+    environment, sharedUpdates, plannerItems, placedItems, historyAnchor,
   ]);
+
+  // If the app stays open past midnight (or is brought back to the foreground the next day), roll over then too.
+  useEffect(() => {
+    if (!saveLoaded) return;
+    const check = () => {
+      const todayKey = localDayKey();
+      const missed = daysBetweenKeys(historyAnchorRef.current, todayKey);
+      if (missed > 0) {
+        setPositive(list => shiftHabitList(list, missed));
+        setNegative(list => shiftHabitList(list, missed));
+        setBonusDone(false);
+        historyAnchorRef.current = todayKey;
+        setHistoryAnchor(todayKey);
+      }
+    };
+    check();
+    const timer = setInterval(check, 60000);
+    document.addEventListener('visibilitychange', check);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', check); };
+  }, [saveLoaded]);
 
   const negativeDerived = negative.map(h => ({ ...h, done: weekSum(h.history) }));
   const lateInWeek = isoWeekdayToday() >= 4; // pests only start showing from Thursday onward
