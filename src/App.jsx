@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useAuth } from "./useAuth";
+import { supabase } from "./supabaseClient";
 import AuthPanel from "./AuthPanel";
 import {
   ListChecks, Trees, BarChart2, Plus, Lock, X, Check, Flame,
@@ -2932,6 +2933,7 @@ export default function GroveApp() {
     { id: "seed-tree-2", type: "decor", emoji: "🌳", x: 85, y: 68, world: "land" },
   ]);
   const [saveLoaded, setSaveLoaded] = useState(false);
+  const [cloudReadyFor, setCloudReadyFor] = useState(null); // user id whose account save has been loaded (or confirmed empty)
   const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error' | null
 
   // If we've just come back from a successful Stripe checkout, refresh the
@@ -2988,6 +2990,57 @@ export default function GroveApp() {
     })();
   }, [auth.user, auth.profile]);
 
+  // Applies a saved game (from this device or from the user's account) to the app's state.
+  const applySaveData = (data) => {
+    // sanitize against items that may have been removed/renamed since this save was made
+    const validShopIds = new Set(SHOP_ITEMS.map(i => i.id));
+    const validEnvIds = new Set(ENVIRONMENTS.map(e => e.id));
+    if (data.unlocked) data.unlocked = data.unlocked.filter(id => validShopIds.has(id) || id === "tree");
+    if (data.hiddenFeatureIds) data.hiddenFeatureIds = data.hiddenFeatureIds.filter(id => validShopIds.has(id));
+    if (data.placedItems) data.placedItems = data.placedItems.filter(it => !it.shopId || validShopIds.has(it.shopId));
+    if (data.unlockedEnvs) data.unlockedEnvs = data.unlockedEnvs.filter(id => validEnvIds.has(id));
+    if (data.environment && !validEnvIds.has(data.environment)) data.environment = "meadow";
+    if (data.shinyUnlocked) data.shinyUnlocked = data.shinyUnlocked.filter(id => validShopIds.has(id));
+    if (data.shinyHidden) data.shinyHidden = data.shinyHidden.filter(id => validShopIds.has(id));
+
+    if (data.pro !== undefined) setPro(data.pro);
+    if (data.creatorMode !== undefined) setCreatorMode(data.creatorMode);
+    if (data.creatorAccessUnlocked !== undefined) setCreatorAccessUnlocked(data.creatorAccessUnlocked);
+    if (data.points !== undefined) setPoints(data.points);
+    if (data.flowers !== undefined) setFlowers(data.flowers);
+    if (data.sparks !== undefined) setSparks(data.sparks);
+    if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
+    if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
+    if (data.bonusDone !== undefined && !(data.historyAnchor && daysBetweenKeys(data.historyAnchor, localDayKey()) > 0)) setBonusDone(data.bonusDone);
+    if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
+    if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
+    if (data.proPlan !== undefined) setProPlan(data.proPlan);
+    if (data.bonusCategory !== undefined) setBonusCategoryState(data.bonusCategory);
+    if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
+    if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
+    if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
+    // New day(s) since this was saved? Roll the histories forward so 'today' is empty again.
+    const todayKey = localDayKey();
+    const missedDays = data.historyAnchor ? daysBetweenKeys(data.historyAnchor, todayKey) : 0;
+    if (missedDays > 0) {
+      if (data.positive) data.positive = shiftHabitList(data.positive, missedDays);
+      if (data.negative) data.negative = shiftHabitList(data.negative, missedDays);
+      setBonusDone(false);
+    }
+    setHistoryAnchor(todayKey);
+    historyAnchorRef.current = todayKey;
+    if (data.positive !== undefined) setPositive(data.positive);
+    if (data.negative !== undefined) setNegative(data.negative);
+    if (data.friends !== undefined) setFriends(data.friends);
+    if (data.unlocked !== undefined) setUnlocked(data.unlocked);
+    if (data.hiddenFeatureIds !== undefined) setHiddenFeatureIds(data.hiddenFeatureIds);
+    if (data.unlockedEnvs !== undefined) setUnlockedEnvs(data.unlockedEnvs);
+    if (data.environment !== undefined) setEnvironment(data.environment);
+    if (data.sharedUpdates !== undefined) setSharedUpdates(data.sharedUpdates);
+    if (data.plannerItems !== undefined) setPlannerItems(data.plannerItems);
+    if (data.placedItems !== undefined) setPlacedItems(data.placedItems);
+  };
+
   // Load any previously saved progress once, on first mount.
   useEffect(() => {
     let cancelled = false;
@@ -2995,55 +3048,7 @@ export default function GroveApp() {
       try {
         const result = await groveStorage.get("grove-save");
         if (cancelled || !result) return;
-        const data = JSON.parse(result.value);
-
-        // sanitize against items that may have been removed/renamed since this save was made
-        const validShopIds = new Set(SHOP_ITEMS.map(i => i.id));
-        const validEnvIds = new Set(ENVIRONMENTS.map(e => e.id));
-        if (data.unlocked) data.unlocked = data.unlocked.filter(id => validShopIds.has(id) || id === "tree");
-        if (data.hiddenFeatureIds) data.hiddenFeatureIds = data.hiddenFeatureIds.filter(id => validShopIds.has(id));
-        if (data.placedItems) data.placedItems = data.placedItems.filter(it => !it.shopId || validShopIds.has(it.shopId));
-        if (data.unlockedEnvs) data.unlockedEnvs = data.unlockedEnvs.filter(id => validEnvIds.has(id));
-        if (data.environment && !validEnvIds.has(data.environment)) data.environment = "meadow";
-        if (data.shinyUnlocked) data.shinyUnlocked = data.shinyUnlocked.filter(id => validShopIds.has(id));
-        if (data.shinyHidden) data.shinyHidden = data.shinyHidden.filter(id => validShopIds.has(id));
-
-        if (data.pro !== undefined) setPro(data.pro);
-        if (data.creatorMode !== undefined) setCreatorMode(data.creatorMode);
-        if (data.creatorAccessUnlocked !== undefined) setCreatorAccessUnlocked(data.creatorAccessUnlocked);
-        if (data.points !== undefined) setPoints(data.points);
-        if (data.flowers !== undefined) setFlowers(data.flowers);
-        if (data.sparks !== undefined) setSparks(data.sparks);
-        if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
-        if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
-        if (data.bonusDone !== undefined && !(data.historyAnchor && daysBetweenKeys(data.historyAnchor, localDayKey()) > 0)) setBonusDone(data.bonusDone);
-        if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
-        if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
-        if (data.proPlan !== undefined) setProPlan(data.proPlan);
-        if (data.bonusCategory !== undefined) setBonusCategoryState(data.bonusCategory);
-        if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
-        if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
-        if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
-        // New day(s) since this was saved? Roll the histories forward so 'today' is empty again.
-        const todayKey = localDayKey();
-        const missedDays = data.historyAnchor ? daysBetweenKeys(data.historyAnchor, todayKey) : 0;
-        if (missedDays > 0) {
-          if (data.positive) data.positive = shiftHabitList(data.positive, missedDays);
-          if (data.negative) data.negative = shiftHabitList(data.negative, missedDays);
-          setBonusDone(false);
-        }
-        setHistoryAnchor(todayKey);
-        historyAnchorRef.current = todayKey;
-        if (data.positive !== undefined) setPositive(data.positive);
-        if (data.negative !== undefined) setNegative(data.negative);
-        if (data.friends !== undefined) setFriends(data.friends);
-        if (data.unlocked !== undefined) setUnlocked(data.unlocked);
-        if (data.hiddenFeatureIds !== undefined) setHiddenFeatureIds(data.hiddenFeatureIds);
-        if (data.unlockedEnvs !== undefined) setUnlockedEnvs(data.unlockedEnvs);
-        if (data.environment !== undefined) setEnvironment(data.environment);
-        if (data.sharedUpdates !== undefined) setSharedUpdates(data.sharedUpdates);
-        if (data.plannerItems !== undefined) setPlannerItems(data.plannerItems);
-        if (data.placedItems !== undefined) setPlacedItems(data.placedItems);
+        applySaveData(JSON.parse(result.value));
       } catch (err) {
         // no save yet, or storage unavailable — just continue with defaults
       } finally {
@@ -3065,17 +3070,61 @@ export default function GroveApp() {
     const t = setTimeout(async () => {
       try {
         await groveStorage.set("grove-save", JSON.stringify(payload));
+        try {
+          if (auth.user && cloudReadyFor === auth.user.id) {
+            const { error: cloudErr } = await supabase.from("user_saves").upsert({ user_id: auth.user.id, data: payload, updated_at: new Date().toISOString() });
+            if (cloudErr) throw cloudErr;
+            window.localStorage.setItem("grove-save-owner", auth.user.id);
+          }
+        } catch (cloudErr) {
+          console.error("Cloud save failed:", cloudErr);
+          setSaveStatus("error");
+          return;
+        }
         setSaveStatus("saved");
       } catch (err) {
         setSaveStatus("error");
       }
-    }, 500); // debounce so rapid changes (like dragging) don't spam saves
+    }, 1200); // debounce so rapid changes (like dragging) don't spam saves
     return () => clearTimeout(t);
   }, [
     saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-    environment, sharedUpdates, plannerItems, placedItems, historyAnchor,
+    environment, sharedUpdates, plannerItems, placedItems, historyAnchor, cloudReadyFor, auth.user,
   ]);
+
+  // When someone signs in, load their saved grove from their account (or start saving this device's grove to it).
+  useEffect(() => {
+    if (!saveLoaded || !auth.user) { if (!auth.user) setCloudReadyFor(null); return; }
+    const uid = auth.user.id;
+    if (cloudReadyFor === uid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: row, error } = await supabase.from("user_saves").select("data").eq("user_id", uid).maybeSingle();
+        if (error) throw error;
+        if (cancelled) return;
+        if (row && row.data) {
+          // The account already has a saved grove: it wins. Keep a copy of what was on this device, just in case.
+          try {
+            const local = window.localStorage.getItem("grove-save");
+            if (local) window.localStorage.setItem("grove-save-device-backup", local);
+          } catch (e) {}
+          applySaveData(row.data);
+        } else {
+          // First time on this account. If this device's progress belonged to a different account, start fresh instead of copying it over.
+          let owner = null;
+          try { owner = window.localStorage.getItem("grove-save-owner"); } catch (e) {}
+          if (owner && owner !== uid) resetGrove();
+        }
+        setCloudReadyFor(uid);
+      } catch (err) {
+        console.error("Could not load account save:", err);
+        // Leave cloud saving off this session so a failed load can never overwrite the account's saved grove.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [saveLoaded, auth.user]);
 
   // If the app stays open past midnight (or is brought back to the foreground the next day), roll over then too.
   useEffect(() => {
