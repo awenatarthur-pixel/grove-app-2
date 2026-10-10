@@ -354,6 +354,8 @@ const AI_ADVISER_COST = 3;
 // Launch switches. Sparks (the second currency) and the AI Adviser are hidden for launch.
 // Flip SPARKS_ENABLED to true to bring Sparks back; the AI Adviser also needs a server function first.
 const SPARKS_ENABLED = false;
+// Creator Mode (free Pro + unlimited points via a secret tap) is OFF for launch. Set true only for private testing.
+const CREATOR_MODE_ENABLED = false;
 const AI_ADVISER_ENABLED = false;
 const SHINY_POINT_COST = 300; // shiny skins are bought with points while Sparks are off
 const LIFETIME_OFFER_MS = 60 * 1000;
@@ -2117,8 +2119,7 @@ function StatsPage({ state, actions }) {
       }
       return;
     }
-    // signed out — local demo fallback
-    actions.inviteFriend();
+    // signed out — invites need an account, so point them to sign in
     setInviteSent(true);
     setTimeout(() => setInviteSent(false), 2400);
   };
@@ -2306,7 +2307,7 @@ function StatsPage({ state, actions }) {
             borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
             color: "var(--bark-900)", fontWeight: 600,
           }}>
-            🐲 Invite sent — you earned a friendly dragon!
+            Sign in on the Plans page to get your invite link and earn a friendly dragon.
           </div>
         )}
 
@@ -2771,7 +2772,7 @@ function Paywall({ onClose, onSubscribe }) {
         {plan.id === "lifetime" ? `Get lifetime access — ${plan.price}` : `Start Pro — ${plan.price}`}
       </button>
       <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center", marginTop: 8 }}>
-        Demo only — no real payment is processed.
+        Secure checkout via Stripe — you'll need to be signed in.
       </p>
     </Modal>
   );
@@ -3057,7 +3058,7 @@ export default function GroveApp() {
   const handleSecretTap = () => {
     const now = Date.now();
     secretTapsRef.current = [...secretTapsRef.current, now].filter(t => now - t < 3000);
-    if (secretTapsRef.current.length >= 7) {
+    if (CREATOR_MODE_ENABLED && secretTapsRef.current.length >= 7) {
       secretTapsRef.current = [];
       setCreatorAccessUnlocked(true);
     }
@@ -3269,11 +3270,10 @@ export default function GroveApp() {
     },
     inviteFriend: () => {
       if (auth.user) return; // signed in: reward only lands once someone actually signs up via your link
-      // signed out — local demo fallback so the feature is still testable without an account
-      setFlowers(f => Math.min(1, f + 1));
+      // signed out: nothing is granted — invites need an account so rewards are real
     },
-    subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); }, // kept for any other callers
-    applySubscription: (planId) => { setPro(true); setProPlan(planId || "monthly"); }, // no instant close — used with the animated modal close
+    subscribe: () => { setShowPaywall(false); }, // real Pro only comes from a paid Stripe checkout
+    applySubscription: () => {},
     shareProgress: (text) => {
       setSharedUpdates(list => [...list, { id: Date.now(), text }]);
     },
@@ -3366,10 +3366,7 @@ export default function GroveApp() {
     ensureLifetimeOfferStarted: () => {
       setLifetimeOfferExpiresAt(prev => prev !== null ? prev : Date.now() + LIFETIME_OFFER_MS);
     },
-    subscribeToPlan: (planId) => {
-      setPro(true);
-      setProPlan(planId);
-    },
+    subscribeToPlan: () => {}, // real Pro only comes from a paid Stripe checkout
     startCheckout: async (planId) => {
       if (!auth.user || !auth.session?.access_token) return;
       try {
@@ -3464,8 +3461,8 @@ export default function GroveApp() {
 
   // Once signed in, real Pro status comes from the database (set by the Stripe webhook)
   // rather than the local demo toggle. Creator Mode always overrides, for testing.
-  const effectivePro = creatorMode ? true : (auth.user && auth.profile ? auth.profile.pro : pro);
-  const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : proPlan;
+  const effectivePro = (CREATOR_MODE_ENABLED && creatorMode) ? true : !!(auth.user && auth.profile && auth.profile.pro);
+  const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : null;
   const effectiveSparks = creatorMode ? sparks : (auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks);
   const effectiveFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
 
@@ -3515,14 +3512,14 @@ export default function GroveApp() {
         </div>
       )}
       <TabBar page={page} setPage={setPage} />
-      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={actions.applySubscription} />}
+      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={(planId) => { if (auth.user) { actions.startCheckout(planId); } else { setPage("plans"); } }} />}
 
       {/* invisible tap zone — tap 7 times fast to reveal Creator Mode; nothing shows here otherwise */}
       <div onClick={handleSecretTap} style={{
         position: "fixed", top: 0, left: 0, width: 44, height: 44, zIndex: 70, cursor: "default",
       }} />
 
-      {creatorAccessUnlocked && (
+      {CREATOR_MODE_ENABLED && creatorAccessUnlocked && (
         <button onClick={toggleCreatorMode} title="Creator mode: free Pro + unlimited points, just for you" style={{
           position: "fixed", top: 14, right: 14, zIndex: 60, border: "none", cursor: "pointer",
           display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 999,
