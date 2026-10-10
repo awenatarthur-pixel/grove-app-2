@@ -3330,21 +3330,21 @@ export default function GroveApp() {
       if (bonusDone) setPoints(p => Math.max(0, p - 15));
       setBonusDone(false);
     },
-    plantFlower: () => {
+    plantFlower: async () => {
       const currentFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
       if (currentFlowers <= 0) return;
       if (placedItems.some(it => it.type === "frienddragon")) return; // max 1 dragon, ever
-      if (auth.user) { auth.adjustFlowers(-1); } else { setFlowers(f => Math.max(0, f - 1)); }
+      if (auth.user) { if (!(await auth.adjustFlowers(-1))) return; } else { setFlowers(f => Math.max(0, f - 1)); }
       setPlacedItems(list => [...list, {
         id: "dragon-" + Date.now(), type: "frienddragon", emoji: "🐲",
         world: WORLD_BY_ENV[environment] || "land",
         x: 30 + Math.random() * 40, y: 55 + Math.random() * 20,
       }]);
     },
-    removeDragon: () => {
+    removeDragon: async () => {
       if (!placedItems.some(it => it.type === "frienddragon")) return;
+      if (auth.user) { if (!(await auth.adjustFlowers(1))) return; } else { setFlowers(f => f + 1); }
       setPlacedItems(list => list.filter(it => it.type !== "frienddragon"));
-      if (auth.user) { auth.adjustFlowers(1); } else { setFlowers(f => f + 1); }
     },
     buyShiny: (shopId, cost) => {
       if (shinyUnlocked.includes(shopId)) return;
