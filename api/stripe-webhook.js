@@ -36,6 +36,15 @@ export default async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Stripe can deliver the same event more than once. Record each event id first; if it's
+  // already recorded, we've handled it, so do nothing. (Needs the stripe_events table.)
+  const { error: dupErr } = await supabaseAdmin.from('stripe_events').insert({ id: event.id });
+  if (dupErr) {
+    if (dupErr.code === '23505') return res.status(200).json({ received: true, duplicate: true });
+    console.error('Could not record Stripe event:', dupErr);
+    return res.status(500).json({ error: 'Could not record event' });
+  }
+
   try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
@@ -53,6 +62,7 @@ export default async function handler(req, res) {
 
         if (fetchErr) {
           console.error('Sparks purchase: failed to fetch profile for userId', userId, fetchErr);
+          throw new Error('Sparks purchase failed: could not read profile');
         } else {
           const currentSparks = profile?.sparks || 0;
           const { error: updateErr } = await supabaseAdmin
@@ -61,6 +71,7 @@ export default async function handler(req, res) {
             .eq('id', userId);
           if (updateErr) {
             console.error('Sparks purchase: failed to update sparks for userId', userId, updateErr);
+            throw new Error('Sparks purchase failed: could not update balance');
           } else {
             console.log(`Sparks purchase: credited ${sparkAmount} to userId ${userId}, new total ${currentSparks + sparkAmount}`);
           }
@@ -74,6 +85,7 @@ export default async function handler(req, res) {
           .eq('id', userId);
         if (updateErr) {
           console.error('Pro purchase: failed to update profile for userId', userId, updateErr);
+          throw new Error('Pro purchase failed: could not update profile');
         }
       }
     }
@@ -84,15 +96,36 @@ export default async function handler(req, res) {
       const { error: cancelErr } = await supabaseAdmin
         .from('profiles')
         .update({ pro: false, pro_plan: null })
-        .eq('stripe_customer_id', subscription.customer);
+        .eq('stripe_customer_id', subscription.customer)
+        .neq('pro_plan', 'lifetime'); // an old cancelled subscription must never remove a Lifetime purchase
       if (cancelErr) {
         console.error('Subscription cancellation: failed to update profile', cancelErr);
+        throw new Error('Cancellation failed: could not update profile');
+      }
+    }
+
+    // A fully refunded Lifetime purchase removes Pro. (Monthly/yearly refunds are handled by
+    // cancelling the subscription in Stripe, which triggers the cancellation above.)
+    if (event.type === 'charge.refunded') {
+      const charge = event.data.object;
+      if (charge.refunded && charge.customer) {
+        const { error: refundErr } = await supabaseAdmin
+          .from('profiles')
+          .update({ pro: false, pro_plan: null })
+          .eq('stripe_customer_id', charge.customer)
+          .eq('pro_plan', 'lifetime');
+        if (refundErr) {
+          console.error('Refund: failed to update profile', refundErr);
+          throw new Error('Refund failed: could not update profile');
+        }
       }
     }
 
     res.status(200).json({ received: true });
   } catch (err) {
     console.error('Webhook handler error:', err);
+    // Forget this event so Stripe's automatic retry gets processed instead of skipped as a duplicate.
+    await supabaseAdmin.from('stripe_events').delete().eq('id', event.id);
     res.status(500).json({ error: err.message });
   }
 }
