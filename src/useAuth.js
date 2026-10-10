@@ -13,7 +13,7 @@ export function useAuth() {
     if (!userId) { setProfile(null); return; }
     const { data, error } = await supabase
       .from('profiles')
-      .select('pro, pro_plan, stripe_customer_id, sparks, flowers, referred_by')
+      .select('pro, pro_plan, stripe_customer_id, sparks, flowers, dragon_placed, referred_by')
       .eq('id', userId)
       .single();
     if (!error) setProfile(data);
@@ -45,32 +45,25 @@ export function useAuth() {
 
   const signOut = () => supabase.auth.signOut();
 
-  // Used for perks like "invite a friend" that should grant real Pro status
-  // to a signed-in user, not just a local demo flag.
-  const grantFreePro = async () => {
-    if (!session?.user) return;
-    const { error } = await supabase.from('profiles').update({ pro: true }).eq('id', session.user.id);
-    if (!error) fetchProfile(session.user.id);
-  };
-
-  // Adjusts the real Sparks balance for a signed-in user (positive to add, negative to spend).
-  // Never goes below zero.
-  const adjustSparks = async (delta) => {
-    if (!session?.user) return;
-    const current = profile?.sparks || 0;
-    const next = Math.max(0, current + delta);
-    const { error } = await supabase.from('profiles').update({ sparks: next }).eq('id', session.user.id);
-    if (!error) fetchProfile(session.user.id);
-  };
-
-  // Adjusts the real Friendly Dragon (flower) count for a signed-in user.
+  // The browser can no longer write to the profiles table (Pro, Sparks and dragons are
+  // server-controlled). Dragon changes go through /api/dragon, which checks the rules.
   const adjustFlowers = async (delta) => {
-    if (!session?.user) return;
-    const current = profile?.flowers || 0;
-    const next = Math.max(0, current + delta);
-    const { error } = await supabase.from('profiles').update({ flowers: next }).eq('id', session.user.id);
-    if (!error) fetchProfile(session.user.id);
+    if (!session?.access_token) return false;
+    try {
+      const res = await fetch('/api/dragon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: delta < 0 ? 'place' : 'remove' }),
+      });
+      const data = await res.json();
+      if (data.success) { await fetchProfile(session.user.id); return true; }
+    } catch (err) {}
+    return false;
   };
+
+  // Sparks are switched off for launch; kept as a harmless no-op so nothing can write them from the browser.
+  const adjustSparks = async () => {};
+  const grantFreePro = async () => {};
 
   return {
     session,
