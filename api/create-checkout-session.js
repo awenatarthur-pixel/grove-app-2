@@ -1,6 +1,11 @@
 import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const supabaseAdmin = createClient(
+  process.env.VITE_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 const PRO_PRICE_IDS = {
   monthly: process.env.STRIPE_PRICE_MONTHLY,
@@ -18,8 +23,18 @@ const SPARK_PRICE_IDS = {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { planId, bundleId, userId, email } = req.body || {};
-  if (!userId || !email) return res.status(400).json({ error: 'Missing userId or email — user must be signed in' });
+  // Verify who's actually calling this from their Supabase session token — never
+  // trust a userId/email sent directly in the request body.
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { data: userData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+  if (authErr || !userData?.user) return res.status(401).json({ error: 'Invalid session' });
+  const userId = userData.user.id;
+  const email = userData.user.email;
+
+  const { planId, bundleId } = req.body || {};
 
   try {
     let session;
@@ -31,6 +46,8 @@ export default async function handler(req, res) {
 
       session = await stripe.checkout.sessions.create({
         mode: planId === 'lifetime' ? 'payment' : 'subscription',
+        // One-off payments don't create a Stripe customer by default, which would make refunds untraceable.
+        ...(planId === 'lifetime' ? { customer_creation: 'always' } : {}),
         payment_method_types: ['card'],
         line_items: [{ price: priceId, quantity: 1 }],
         customer_email: email,
