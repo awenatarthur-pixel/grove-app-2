@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useAuth } from "./useAuth";
-import { supabase } from "./supabaseClient";
 import AuthPanel from "./AuthPanel";
+import { GuideModal, GuideButton, WelcomeCard, useVisitedPages, useWelcomeCard, guideProgress } from "./QuestGuide";
 import {
   ListChecks, Trees, BarChart2, Plus, Lock, X, Check, Flame,
   Sparkles, Heart, ShoppingBag, Trophy, UserPlus, Flower2, Crown,
@@ -67,30 +67,6 @@ function lastNDates(n, endDate) {
   }
   return arr;
 }
-// --- Day rollover -------------------------------------------------------
-// Each habit's history is a fixed-length list whose LAST entry means "today". Nothing in the list
-// records which calendar day that is, so when a new day starts the list has to be shifted left
-// (yesterday becomes the second-to-last entry, today starts empty). We remember the day the data
-// was last aligned to (the "anchor") and shift by however many days have passed since.
-function localDayKey(d) {
-  const x = d || new Date();
-  return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
-}
-function daysBetweenKeys(fromKey, toKey) {
-  const [fy, fm, fd] = fromKey.split("-").map(Number);
-  const [ty, tm, td] = toKey.split("-").map(Number);
-  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
-}
-function shiftHistory(history, days) {
-  if (!history || days <= 0) return history;
-  const len = history.length;
-  if (days >= len) return new Array(len).fill(0);
-  return history.slice(days).concat(new Array(days).fill(0));
-}
-function shiftHabitList(list, days) {
-  return (list || []).map(h => ({ ...h, history: shiftHistory(h.history, days) }));
-}
-
 function seededHistory(len, weight, forceLast) {
   const arr = [];
   for (let i = 0; i < len; i++) arr.push(Math.random() < weight ? 1 : 0);
@@ -152,13 +128,17 @@ const HISTORY_LEN = 28;
 /* -------------------------------------------------------------------------
    Demo data
 ------------------------------------------------------------------------- */
-// New users start with a clean slate: no pre-filled demo habits.
-const START_POSITIVE = [];
+const START_POSITIVE = [
+  { id: "p1", name: "Drink water", streak: 4, doneToday: false, history: seededHistory(HISTORY_LEN, 0.75, false) },
+  { id: "p2", name: "Read 10 pages", streak: 2, doneToday: true, history: seededHistory(HISTORY_LEN, 0.7, true) },
+  { id: "p3", name: "Morning walk", streak: 7, doneToday: false, history: seededHistory(HISTORY_LEN, 0.8, false) },
+];
 
-const START_NEGATIVE = [];
+const START_NEGATIVE = [
+  { id: "n1", name: "No junk food", target: 4, history: seededHistory(HISTORY_LEN, 0.55, false) },
+  { id: "n2", name: "No late nights", target: 5, history: seededHistory(HISTORY_LEN, 0.4, false) },
+];
 
-// Friends/leaderboard is switched off for launch: there is no real friends system yet, so the demo friends are hidden.
-const FRIENDS_ENABLED = false;
 const FRIENDS = [
   { id: "f1", name: "Leon", note: "went to the gym 5 times this week", kudos: 3, avatar: "🏋️" },
   { id: "f2", name: "Mira", note: "hit a 12-day reading streak", kudos: 6, avatar: "📚" },
@@ -359,11 +339,11 @@ const FREE_POSITIVE_LIMIT = 3;
 const FREE_NEGATIVE_LIMIT = 2;
 const FREE_PLANNER_PER_DAY = 2;
 const PRO_PLANNER_PER_DAY = 8;
-const PRO_PRICE = "£3.99";
+const PRO_PRICE = "£4";
 const PRO_PLANS = [
-  { id: "monthly", label: "Monthly", price: "£3.99", sub: "per month", badge: null },
-  { id: "yearly", label: "Yearly", price: "£24.99", sub: "per year — just £2.08/month", badge: "Save 48%" },
-  { id: "lifetime", label: "Lifetime", price: "£39.99", sub: "one-time — pay once, keep forever", badge: "Pay once" },
+  { id: "monthly", label: "Monthly", price: "£4", sub: "per month", badge: null },
+  { id: "yearly", label: "Yearly", price: "£32", sub: "per year", badge: "Best value" },
+  { id: "lifetime", label: "Lifetime", price: "£30", sub: "one-time — limited offer", badge: "First minute only" },
 ];
 const SHINY_BUNDLES = [
   { id: "b3", amount: 3, price: "£0.99" },
@@ -375,8 +355,6 @@ const AI_ADVISER_COST = 3;
 // Launch switches. Sparks (the second currency) and the AI Adviser are hidden for launch.
 // Flip SPARKS_ENABLED to true to bring Sparks back; the AI Adviser also needs a server function first.
 const SPARKS_ENABLED = false;
-// Creator Mode (free Pro + unlimited points via a secret tap) is OFF for launch. Set true only for private testing.
-const CREATOR_MODE_ENABLED = false;
 const AI_ADVISER_ENABLED = false;
 const SHINY_POINT_COST = 300; // shiny skins are bought with points while Sparks are off
 const LIFETIME_OFFER_MS = 60 * 1000;
@@ -602,7 +580,12 @@ function HabitTracker({ state, actions }) {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <TopBar title="Your habits" right={<PointsPill points={points} />} />
+      <TopBar title="Your habits" right={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {state.guideStats && <GuideButton onClick={() => actions.openGuide("quests")} doneCount={state.guideStats.done} total={state.guideStats.total} />}
+          <PointsPill points={points} />
+        </div>
+      } />
 
       {!pro && (
         <div onClick={actions.openPaywall} style={{
@@ -650,9 +633,6 @@ function HabitTracker({ state, actions }) {
             <WeekStrip habit={h} onToggleDay={(iso) => actions.toggleDay(h.id, iso)} />
           </div>
         ))}
-        {positive.length === 0 && (
-          <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", textAlign: "center", margin: "4px 0 6px" }}>Add your first habit to start growing your grove 🌱</p>
-        )}
         <AddRow
           label={positive.length < FREE_POSITIVE_LIMIT || pro ? "Add a habit" : "Unlock more habits"}
           locked={positive.length >= FREE_POSITIVE_LIMIT && !pro}
@@ -719,9 +699,6 @@ function HabitTracker({ state, actions }) {
             )}
           </div>
         ))}
-        {negative.length === 0 && (
-          <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", textAlign: "center", margin: "4px 0 6px" }}>Add something you want to cut back on, and keep the fog away.</p>
-        )}
         <AddRow
           label={negative.length < FREE_NEGATIVE_LIMIT || pro ? "Add a habit to break" : "Unlock more habits"}
           locked={negative.length >= FREE_NEGATIVE_LIMIT && !pro}
@@ -1505,8 +1482,7 @@ function TheGrove({ state, actions }) {
           const isChameleon = item.shopId === "chameleon";
           const isSloth = item.shopId === "sloth";
           const isDraggingThis = draggingId === item.id;
-          const isRainbow = isAnimal && state.pro && (state.rainbowOn || []).includes(item.shopId);
-          const isShiny = !isRainbow && isAnimal && state.shinyUnlocked.includes(item.shopId) && !state.shinyHidden.includes(item.shopId);
+          const isShiny = isAnimal && state.shinyUnlocked.includes(item.shopId) && !state.shinyHidden.includes(item.shopId);
           const size = item.shopId === "coral" ? 122 : item.shopId === "jungletree" ? 108 : item.type === "decor" ? 68 : 40;
           const animName = isSloth ? "grove-hang" : isAnimal ? "grove-roam" : "grove-sway";
           const animDur = isSloth ? 5.5 : (item.roamDuration || (isAnimal ? 5.5 : 4));
@@ -1567,10 +1543,8 @@ function TheGrove({ state, actions }) {
                     lineHeight: 1, position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
                     animation: isDraggingThis ? "none" : isChameleon
                       ? `${animName} ${animDur}s ease-in-out infinite, grove-chameleon-color 16s ease-in-out infinite`
-                      : isRainbow
-                      ? `${animName} ${animDur}s ease-in-out infinite, grove-rainbow 6s linear infinite`
                       : `${animName} ${animDur}s ease-in-out infinite`,
-                    filter: (isChameleon || isRainbow) ? undefined : isShiny ? "hue-rotate(180deg) saturate(1.4) brightness(1.05)" : (fogLevel >= 2 ? "brightness(0.85) saturate(0.8) drop-shadow(0 3px 3px rgba(0,0,0,0.15))" : `drop-shadow(0 ${isDraggingThis ? 8 : 3}px ${isDraggingThis ? 8 : 3}px rgba(0,0,0,${isDraggingThis ? 0.28 : 0.15}))`),
+                    filter: isChameleon ? undefined : isShiny ? "hue-rotate(180deg) saturate(1.4) brightness(1.05)" : (fogLevel >= 2 ? "brightness(0.85) saturate(0.8) drop-shadow(0 3px 3px rgba(0,0,0,0.15))" : `drop-shadow(0 ${isDraggingThis ? 8 : 3}px ${isDraggingThis ? 8 : 3}px rgba(0,0,0,${isDraggingThis ? 0.28 : 0.15}))`),
                     "--roam": `${item.roamDistance || 26}px`,
                   }}
                   title={isSloth ? "Tap to pet — attached to its tree" : isAnimal ? "Tap to pet" : undefined}
@@ -1578,7 +1552,7 @@ function TheGrove({ state, actions }) {
                   {item.emoji}
                 </div>
               </div>
-              {(isShiny || isRainbow) && (
+              {isShiny && (
                 <span style={{
                   position: "absolute", left: "68%", top: "8%", fontSize: size * 0.32, pointerEvents: "none",
                   animation: "grove-sparkle-twinkle 1.6s ease-in-out infinite",
@@ -1668,7 +1642,7 @@ function TheGrove({ state, actions }) {
         <Modal onClose={() => setShinyOpen(false)}>
           <h3 style={modalTitleStyle}>Shiny skins</h3>
           <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", margin: "-8px 0 12px" }}>
-            Give an animal you own a shimmering opposite-colored variant (Pro members also get a 🌈 rainbow skin, free), {SPARKS_ENABLED ? "paid for in Sparks — earned by completing your daily challenge (max 1 a day)." : `bought with points (${SHINY_POINT_COST} each).`}
+            Give an animal you own a shimmering opposite-colored variant, {SPARKS_ENABLED ? "paid for in Sparks — earned by completing your daily challenge (max 1 a day)." : `bought with points (${SHINY_POINT_COST} each).`}
           </p>
           {(() => {
             const ownedAnimals = SHOP_ITEMS.filter(i => i.type === "animal" && i.world === currentWorld && state.unlocked.includes(i.id));
@@ -1716,12 +1690,6 @@ function TheGrove({ state, actions }) {
                           opacity: balance < oppositeCost ? 0.5 : 1,
                         }}>{SPARKS_ENABLED ? `✨ ${oppositeCost}` : `${oppositeCost} pts`}</button>
                       )}
-                      <button onClick={() => actions.toggleRainbow(a.id)} title={state.pro ? "Rainbow skin (Pro)" : "Rainbow skins are a Pro perk"} style={{
-                        padding: "6px 10px", borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0,
-                        background: state.pro && (state.rainbowOn || []).includes(a.id) ? "var(--moss-600)" : "var(--parchment-50)",
-                        color: state.pro && (state.rainbowOn || []).includes(a.id) ? "#fff" : "var(--bark-700)",
-                        fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11,
-                      }}>{state.pro ? (((state.rainbowOn || []).includes(a.id)) ? "🌈 On" : "🌈 Off") : "🌈 Pro"}</button>
                     </div>
                   );
                 })}
@@ -1959,16 +1927,10 @@ function TheGrove({ state, actions }) {
           66% { filter: hue-rotate(-25deg) saturate(0.92) drop-shadow(0 3px 3px rgba(0,0,0,0.15)); }
           100% { filter: hue-rotate(0deg) saturate(1) drop-shadow(0 3px 3px rgba(0,0,0,0.15)); }
         }
-        @keyframes grove-rainbow {
-          0% { filter: hue-rotate(0deg) saturate(1.8) brightness(1.1) drop-shadow(0 3px 3px rgba(0,0,0,0.15)); }
-          100% { filter: hue-rotate(360deg) saturate(1.8) brightness(1.1) drop-shadow(0 3px 3px rgba(0,0,0,0.15)); }
-        }
         @keyframes grove-shiny-glow {
           0%, 100% { filter: hue-rotate(0deg) saturate(1.5) brightness(1.1) drop-shadow(0 0 6px rgba(233,196,106,0.8)); }
           50% { filter: hue-rotate(20deg) saturate(1.8) brightness(1.25) drop-shadow(0 0 10px rgba(233,196,106,1)); }
         }
-        /* keep page width steady so the grove scene never changes shape when the page gets longer or shorter */
-        html { scrollbar-gutter: stable; }
         @keyframes grove-sparkle-twinkle {
           0%, 100% { opacity: 0.4; transform: scale(0.85) rotate(0deg); }
           50% { opacity: 1; transform: scale(1.15) rotate(15deg); }
@@ -2161,7 +2123,8 @@ function StatsPage({ state, actions }) {
       }
       return;
     }
-    // signed out — invites need an account, so point them to sign in
+    // signed out — local demo fallback
+    actions.inviteFriend();
     setInviteSent(true);
     setTimeout(() => setInviteSent(false), 2400);
   };
@@ -2231,7 +2194,7 @@ function StatsPage({ state, actions }) {
         </button>
       </div>
 
-      <SectionLabel label="Today's objectives" icon={<ListTodo size={14} />} sub={FRIENDS_ENABLED ? `${doneCount}/${totalCount} done — visible to friends only if you choose to share` : `${doneCount}/${totalCount} done today`} />
+      <SectionLabel label="Today's objectives" icon={<ListTodo size={14} />} sub={`${doneCount}/${totalCount} done — visible to friends only if you choose to share`} />
       <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: 8 }}>
         {state.positive.map(h => (
           <div key={h.id} onClick={() => actions.toggleToday(h.id)} style={{
@@ -2249,8 +2212,6 @@ function StatsPage({ state, actions }) {
             }}>{h.name}</span>
           </div>
         ))}
-        {FRIENDS_ENABLED && (
-        <>
         <button onClick={() => setConfirmShare(true)} style={{
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
           padding: "12px 16px", borderRadius: 14, border: "none", cursor: "pointer",
@@ -2263,11 +2224,9 @@ function StatsPage({ state, actions }) {
             Last shared: "{state.sharedUpdates[state.sharedUpdates.length - 1].text}"
           </div>
         )}
-        </>
-        )}
       </div>
 
-      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub={SPARKS_ENABLED ? "A small daily push, your pick of focus — optional, +15 pts + 1 Spark" : `A small daily push, your pick of focus — optional, +${15 * (state.pointsMult || 1)} pts`} />
+      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub={SPARKS_ENABLED ? "A small daily push, your pick of focus — optional, +15 pts + 1 Spark" : "A small daily push, your pick of focus — optional, +15 pts"} />
       <div style={{ padding: "0 20px 4px" }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           {Object.entries(BONUS_CATEGORIES).map(([key, cat]) => (
@@ -2298,14 +2257,14 @@ function StatsPage({ state, actions }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px" }}>
-        <SectionLabel label={FRIENDS_ENABLED ? "Leaderboard" : "Invite friends"} icon={FRIENDS_ENABLED ? <Trophy size={14} /> : <UserPlus size={14} />} />
-        {FRIENDS_ENABLED && <button onClick={() => actions.setLeaderboardHidden(!state.leaderboardHidden)} style={{
+        <SectionLabel label="Leaderboard" icon={<Trophy size={14} />} />
+        <button onClick={() => actions.setLeaderboardHidden(!state.leaderboardHidden)} style={{
           display: "flex", alignItems: "center", gap: 5, border: "none", background: "none", cursor: "pointer",
           fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--bark-700)", marginBottom: 6,
-        }}>{state.leaderboardHidden ? <EyeOff size={13} /> : <Eye size={13} />} {state.leaderboardHidden ? "Hidden" : "Visible"}</button>}
+        }}>{state.leaderboardHidden ? <EyeOff size={13} /> : <Eye size={13} />} {state.leaderboardHidden ? "Hidden" : "Visible"}</button>
       </div>
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10, alignItems: "start" }}>
-        {!FRIENDS_ENABLED ? null : state.leaderboardHidden ? (
+        {state.leaderboardHidden ? (
           <div style={{
             background: "var(--parchment-50)", borderRadius: 16, padding: "14px", textAlign: "center",
             fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", gridColumn: "1 / -1",
@@ -2353,7 +2312,7 @@ function StatsPage({ state, actions }) {
             borderRadius: 14, padding: "10px 14px", fontFamily: "'Manrope', sans-serif", fontSize: 12,
             color: "var(--bark-900)", fontWeight: 600,
           }}>
-            Sign in on the Plans page to get your invite link and earn a friendly dragon.
+            🐲 Invite sent — you earned a friendly dragon!
           </div>
         )}
 
@@ -2563,7 +2522,7 @@ function PlansPage({ state, actions }) {
   }, []);
 
   const lifetimeRemaining = state.lifetimeOfferExpiresAt ? Math.max(0, state.lifetimeOfferExpiresAt - now) : LIFETIME_OFFER_MS;
-  const lifetimeExpired = false; // the "first minute" countdown has been removed: Lifetime is always available
+  const lifetimeExpired = state.lifetimeOfferExpiresAt !== null && lifetimeRemaining <= 0;
   const lifetimeSeconds = Math.ceil(lifetimeRemaining / 1000);
 
   const sendAiMessage = async () => {
@@ -2637,7 +2596,7 @@ function PlansPage({ state, actions }) {
         )}
       </div>
 
-      <SectionLabel label="Grove Pro" icon={<Crown size={14} />} sub={state.pro ? `You're on the ${state.proPlan || "monthly"} plan` : "Unlimited habits, 2× points, rainbow skins & more"} />
+      <SectionLabel label="Grove Pro" icon={<Crown size={14} />} sub={state.pro ? `You're on the ${state.proPlan || "monthly"} plan` : "Unlimited habits, journal, AI coach & more"} />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10, alignItems: "start" }}>
         {PRO_PLANS.map(p => {
           const isLifetime = p.id === "lifetime";
@@ -2661,6 +2620,11 @@ function PlansPage({ state, actions }) {
                   )}
                 </div>
                 <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)" }}>{p.sub}</div>
+                {isLifetime && !lifetimeExpired && (
+                  <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--blush-500)", marginTop: 2 }}>
+                    ⏳ Ends in {lifetimeSeconds}s
+                  </div>
+                )}
                 {isLifetime && lifetimeExpired && (
                   <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--bark-700)", marginTop: 2 }}>Offer expired</div>
                 )}
@@ -2799,10 +2763,10 @@ function Paywall({ onClose, onSubscribe }) {
       <ul style={{ listStyle: "none", padding: 0, margin: "14px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         {[
           "Unlimited habits to grow and to break",
-          "2× points on everything you earn",
-          "Rainbow skins for your animals",
           "More planner slots per day",
-          "Support Grove's ongoing development",
+          "Personal journal",
+          "AI coach for grove-side advice",
+          "Content blocker",
         ].map(f => (
           <li key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Manrope', sans-serif", fontSize: 13, color: "var(--forest-900)" }}>
             <Check size={15} color="var(--moss-600)" strokeWidth={3} /> {f}
@@ -2813,7 +2777,7 @@ function Paywall({ onClose, onSubscribe }) {
         {plan.id === "lifetime" ? `Get lifetime access — ${plan.price}` : `Start Pro — ${plan.price}`}
       </button>
       <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", textAlign: "center", marginTop: 8 }}>
-        Secure checkout via Stripe — you'll need to be signed in.
+        Demo only — no real payment is processed.
       </p>
     </Modal>
   );
@@ -2920,15 +2884,12 @@ export default function GroveApp() {
   const [sparks, setSparks] = useState(0);
   const [shinyUnlocked, setShinyUnlocked] = useState([]);
   const [shinyHidden, setShinyHidden] = useState([]);
-  const [rainbowOn, setRainbowOn] = useState([]); // animals with the Pro rainbow skin switched on
   const [showPaywall, setShowPaywall] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [bonusDone, setBonusDone] = useState(false);
   const [lastSparkDate, setLastSparkDate] = useState(null);
   const [lifetimeOfferExpiresAt, setLifetimeOfferExpiresAt] = useState(null);
-  const [historyAnchor, setHistoryAnchor] = useState(localDayKey());
-  const historyAnchorRef = useRef(historyAnchor);
   const [proPlan, setProPlan] = useState(null); // 'monthly' | 'yearly' | 'lifetime' | null
   const [bonusCategory, setBonusCategoryState] = useState("social");
   const [confettiEnabled, setConfettiEnabled] = useState(true);
@@ -2950,8 +2911,11 @@ export default function GroveApp() {
     { id: "seed-tree-2", type: "decor", emoji: "🌳", x: 85, y: 68, world: "land" },
   ]);
   const [saveLoaded, setSaveLoaded] = useState(false);
-  const [cloudReadyFor, setCloudReadyFor] = useState(null); // user id whose account save has been loaded (or confirmed empty)
   const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error' | null
+  // Optional guide (quest log + tour): closed unless the person opens it
+  const [guideTab, setGuideTab] = useState(null); // null | 'quests' | 'tour'
+  const visitedPages = useVisitedPages(page);
+  const [showWelcome, dismissWelcome] = useWelcomeCard();
 
   // If we've just come back from a successful Stripe checkout, refresh the
   // user's Pro status from the database and clean the URL.
@@ -3007,59 +2971,6 @@ export default function GroveApp() {
     })();
   }, [auth.user, auth.profile]);
 
-  // Applies a saved game (from this device or from the user's account) to the app's state.
-  const applySaveData = (data) => {
-    // sanitize against items that may have been removed/renamed since this save was made
-    const validShopIds = new Set(SHOP_ITEMS.map(i => i.id));
-    const validEnvIds = new Set(ENVIRONMENTS.map(e => e.id));
-    if (data.unlocked) data.unlocked = data.unlocked.filter(id => validShopIds.has(id) || id === "tree");
-    if (data.hiddenFeatureIds) data.hiddenFeatureIds = data.hiddenFeatureIds.filter(id => validShopIds.has(id));
-    if (data.placedItems) data.placedItems = data.placedItems.filter(it => !it.shopId || validShopIds.has(it.shopId));
-    if (data.unlockedEnvs) data.unlockedEnvs = data.unlockedEnvs.filter(id => validEnvIds.has(id));
-    if (data.environment && !validEnvIds.has(data.environment)) data.environment = "meadow";
-    if (data.shinyUnlocked) data.shinyUnlocked = data.shinyUnlocked.filter(id => validShopIds.has(id));
-    if (data.shinyHidden) data.shinyHidden = data.shinyHidden.filter(id => validShopIds.has(id));
-    if (data.rainbowOn) data.rainbowOn = data.rainbowOn.filter(id => validShopIds.has(id));
-
-    if (data.pro !== undefined) setPro(data.pro);
-    if (data.creatorMode !== undefined) setCreatorMode(data.creatorMode);
-    if (data.creatorAccessUnlocked !== undefined) setCreatorAccessUnlocked(data.creatorAccessUnlocked);
-    if (data.points !== undefined) setPoints(data.points);
-    if (data.flowers !== undefined) setFlowers(data.flowers);
-    if (data.sparks !== undefined) setSparks(data.sparks);
-    if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
-    if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
-    if (data.rainbowOn !== undefined) setRainbowOn(data.rainbowOn);
-    if (data.bonusDone !== undefined && !(data.historyAnchor && daysBetweenKeys(data.historyAnchor, localDayKey()) > 0)) setBonusDone(data.bonusDone);
-    if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
-    if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
-    if (data.proPlan !== undefined) setProPlan(data.proPlan);
-    if (data.bonusCategory !== undefined) setBonusCategoryState(data.bonusCategory);
-    if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
-    if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
-    if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
-    // New day(s) since this was saved? Roll the histories forward so 'today' is empty again.
-    const todayKey = localDayKey();
-    const missedDays = data.historyAnchor ? daysBetweenKeys(data.historyAnchor, todayKey) : 0;
-    if (missedDays > 0) {
-      if (data.positive) data.positive = shiftHabitList(data.positive, missedDays);
-      if (data.negative) data.negative = shiftHabitList(data.negative, missedDays);
-      setBonusDone(false);
-    }
-    setHistoryAnchor(todayKey);
-    historyAnchorRef.current = todayKey;
-    if (data.positive !== undefined) setPositive(data.positive);
-    if (data.negative !== undefined) setNegative(data.negative);
-    if (data.friends !== undefined) setFriends(data.friends);
-    if (data.unlocked !== undefined) setUnlocked(data.unlocked);
-    if (data.hiddenFeatureIds !== undefined) setHiddenFeatureIds(data.hiddenFeatureIds);
-    if (data.unlockedEnvs !== undefined) setUnlockedEnvs(data.unlockedEnvs);
-    if (data.environment !== undefined) setEnvironment(data.environment);
-    if (data.sharedUpdates !== undefined) setSharedUpdates(data.sharedUpdates);
-    if (data.plannerItems !== undefined) setPlannerItems(data.plannerItems);
-    if (data.placedItems !== undefined) setPlacedItems(data.placedItems);
-  };
-
   // Load any previously saved progress once, on first mount.
   useEffect(() => {
     let cancelled = false;
@@ -3067,7 +2978,45 @@ export default function GroveApp() {
       try {
         const result = await groveStorage.get("grove-save");
         if (cancelled || !result) return;
-        applySaveData(JSON.parse(result.value));
+        const data = JSON.parse(result.value);
+
+        // sanitize against items that may have been removed/renamed since this save was made
+        const validShopIds = new Set(SHOP_ITEMS.map(i => i.id));
+        const validEnvIds = new Set(ENVIRONMENTS.map(e => e.id));
+        if (data.unlocked) data.unlocked = data.unlocked.filter(id => validShopIds.has(id) || id === "tree");
+        if (data.hiddenFeatureIds) data.hiddenFeatureIds = data.hiddenFeatureIds.filter(id => validShopIds.has(id));
+        if (data.placedItems) data.placedItems = data.placedItems.filter(it => !it.shopId || validShopIds.has(it.shopId));
+        if (data.unlockedEnvs) data.unlockedEnvs = data.unlockedEnvs.filter(id => validEnvIds.has(id));
+        if (data.environment && !validEnvIds.has(data.environment)) data.environment = "meadow";
+        if (data.shinyUnlocked) data.shinyUnlocked = data.shinyUnlocked.filter(id => validShopIds.has(id));
+        if (data.shinyHidden) data.shinyHidden = data.shinyHidden.filter(id => validShopIds.has(id));
+
+        if (data.pro !== undefined) setPro(data.pro);
+        if (data.creatorMode !== undefined) setCreatorMode(data.creatorMode);
+        if (data.creatorAccessUnlocked !== undefined) setCreatorAccessUnlocked(data.creatorAccessUnlocked);
+        if (data.points !== undefined) setPoints(data.points);
+        if (data.flowers !== undefined) setFlowers(data.flowers);
+        if (data.sparks !== undefined) setSparks(data.sparks);
+        if (data.shinyUnlocked !== undefined) setShinyUnlocked(data.shinyUnlocked);
+        if (data.shinyHidden !== undefined) setShinyHidden(data.shinyHidden);
+        if (data.bonusDone !== undefined) setBonusDone(data.bonusDone);
+        if (data.lastSparkDate !== undefined) setLastSparkDate(data.lastSparkDate);
+        if (data.lifetimeOfferExpiresAt !== undefined) setLifetimeOfferExpiresAt(data.lifetimeOfferExpiresAt);
+        if (data.proPlan !== undefined) setProPlan(data.proPlan);
+        if (data.bonusCategory !== undefined) setBonusCategoryState(data.bonusCategory);
+        if (data.confettiEnabled !== undefined) setConfettiEnabled(data.confettiEnabled);
+        if (data.leaderboardHidden !== undefined) setLeaderboardHidden(data.leaderboardHidden);
+        if (data.feedbackSubmitted !== undefined) setFeedbackSubmitted(data.feedbackSubmitted);
+        if (data.positive !== undefined) setPositive(data.positive);
+        if (data.negative !== undefined) setNegative(data.negative);
+        if (data.friends !== undefined) setFriends(data.friends);
+        if (data.unlocked !== undefined) setUnlocked(data.unlocked);
+        if (data.hiddenFeatureIds !== undefined) setHiddenFeatureIds(data.hiddenFeatureIds);
+        if (data.unlockedEnvs !== undefined) setUnlockedEnvs(data.unlockedEnvs);
+        if (data.environment !== undefined) setEnvironment(data.environment);
+        if (data.sharedUpdates !== undefined) setSharedUpdates(data.sharedUpdates);
+        if (data.plannerItems !== undefined) setPlannerItems(data.plannerItems);
+        if (data.placedItems !== undefined) setPlacedItems(data.placedItems);
       } catch (err) {
         // no save yet, or storage unavailable — just continue with defaults
       } finally {
@@ -3081,89 +3030,25 @@ export default function GroveApp() {
   useEffect(() => {
     if (!saveLoaded) return;
     const payload = {
-      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, rainbowOn, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
+      pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
       feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-      environment, sharedUpdates, plannerItems, placedItems, historyAnchor,
+      environment, sharedUpdates, plannerItems, placedItems,
     };
     setSaveStatus("saving");
     const t = setTimeout(async () => {
       try {
         await groveStorage.set("grove-save", JSON.stringify(payload));
-        try {
-          if (auth.user && cloudReadyFor === auth.user.id) {
-            const { error: cloudErr } = await supabase.from("user_saves").upsert({ user_id: auth.user.id, data: payload, updated_at: new Date().toISOString() });
-            if (cloudErr) throw cloudErr;
-            window.localStorage.setItem("grove-save-owner", auth.user.id);
-          }
-        } catch (cloudErr) {
-          console.error("Cloud save failed:", cloudErr);
-          setSaveStatus("error");
-          return;
-        }
         setSaveStatus("saved");
       } catch (err) {
         setSaveStatus("error");
       }
-    }, 1200); // debounce so rapid changes (like dragging) don't spam saves
+    }, 500); // debounce so rapid changes (like dragging) don't spam saves
     return () => clearTimeout(t);
   }, [
-    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, rainbowOn, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
+    saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-    environment, sharedUpdates, plannerItems, placedItems, historyAnchor, cloudReadyFor, auth.user,
+    environment, sharedUpdates, plannerItems, placedItems,
   ]);
-
-  // When someone signs in, load their saved grove from their account (or start saving this device's grove to it).
-  useEffect(() => {
-    if (!saveLoaded || !auth.user) { if (!auth.user) setCloudReadyFor(null); return; }
-    const uid = auth.user.id;
-    if (cloudReadyFor === uid) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data: row, error } = await supabase.from("user_saves").select("data").eq("user_id", uid).maybeSingle();
-        if (error) throw error;
-        if (cancelled) return;
-        if (row && row.data) {
-          // The account already has a saved grove: it wins. Keep a copy of what was on this device, just in case.
-          try {
-            const local = window.localStorage.getItem("grove-save");
-            if (local) window.localStorage.setItem("grove-save-device-backup", local);
-          } catch (e) {}
-          applySaveData(row.data);
-        } else {
-          // First time on this account. If this device's progress belonged to a different account, start fresh instead of copying it over.
-          let owner = null;
-          try { owner = window.localStorage.getItem("grove-save-owner"); } catch (e) {}
-          if (owner && owner !== uid) resetGrove();
-        }
-        setCloudReadyFor(uid);
-      } catch (err) {
-        console.error("Could not load account save:", err);
-        // Leave cloud saving off this session so a failed load can never overwrite the account's saved grove.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [saveLoaded, auth.user]);
-
-  // If the app stays open past midnight (or is brought back to the foreground the next day), roll over then too.
-  useEffect(() => {
-    if (!saveLoaded) return;
-    const check = () => {
-      const todayKey = localDayKey();
-      const missed = daysBetweenKeys(historyAnchorRef.current, todayKey);
-      if (missed > 0) {
-        setPositive(list => shiftHabitList(list, missed));
-        setNegative(list => shiftHabitList(list, missed));
-        setBonusDone(false);
-        historyAnchorRef.current = todayKey;
-        setHistoryAnchor(todayKey);
-      }
-    };
-    check();
-    const timer = setInterval(check, 60000);
-    document.addEventListener('visibilitychange', check);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', check); };
-  }, [saveLoaded]);
 
   const negativeDerived = negative.map(h => ({ ...h, done: weekSum(h.history) }));
   const lateInWeek = isoWeekdayToday() >= 4; // pests only start showing from Thursday onward
@@ -3182,7 +3067,7 @@ export default function GroveApp() {
   const handleSecretTap = () => {
     const now = Date.now();
     secretTapsRef.current = [...secretTapsRef.current, now].filter(t => now - t < 3000);
-    if (CREATOR_MODE_ENABLED && secretTapsRef.current.length >= 7) {
+    if (secretTapsRef.current.length >= 7) {
       secretTapsRef.current = [];
       setCreatorAccessUnlocked(true);
     }
@@ -3206,18 +3091,15 @@ export default function GroveApp() {
     setSparks(0);
     setShinyUnlocked([]);
     setShinyHidden([]);
-    setRainbowOn([]);
     setLastSparkDate(null);
     setDetailHabitId(null);
     setPage("tracker");
     if (creatorMode) { setPro(true); setPoints(99999); } else { setPro(false); setPoints(70); }
   };
 
-  // Pro members earn double points on everything.
-  const pointsMult = (CREATOR_MODE_ENABLED && creatorMode) || (auth.user && auth.profile && auth.profile.pro) ? 2 : 1;
-
   const actions = {
     openPaywall: () => setShowPaywall(true),
+    openGuide: (tab) => setGuideTab(tab || "quests"),
     openHabitDetail: (id) => setDetailHabitId(id),
     closeHabitDetail: () => setDetailHabitId(null),
     toggleDay: (id, iso) => {
@@ -3237,7 +3119,7 @@ export default function GroveApp() {
       });
       const after = dailyBonus(countDone(newList));
       setPositive(newList);
-      setPoints(p => Math.max(0, p + (after - before) * pointsMult));
+      setPoints(p => Math.max(0, p + (after - before)));
 
       // Completing a habit earns a small Spark and levels up its linked animal, if any.
       // Symmetrically reversed if the same tick is undone right after (matches how
@@ -3271,7 +3153,7 @@ export default function GroveApp() {
       });
       const after = dailyBonus(countClean(newList));
       setNegative(newList);
-      setPoints(p => Math.max(0, p + (after - before) * pointsMult));
+      setPoints(p => Math.max(0, p + (after - before)));
     },
     addHabit: (kind, name) => {
       if (kind === "positive") {
@@ -3398,10 +3280,11 @@ export default function GroveApp() {
     },
     inviteFriend: () => {
       if (auth.user) return; // signed in: reward only lands once someone actually signs up via your link
-      // signed out: nothing is granted — invites need an account so rewards are real
+      // signed out — local demo fallback so the feature is still testable without an account
+      setFlowers(f => Math.min(1, f + 1));
     },
-    subscribe: () => { setShowPaywall(false); }, // real Pro only comes from a paid Stripe checkout
-    applySubscription: () => {},
+    subscribe: (planId) => { setPro(true); setProPlan(planId || "monthly"); setShowPaywall(false); }, // kept for any other callers
+    applySubscription: (planId) => { setPro(true); setProPlan(planId || "monthly"); }, // no instant close — used with the animated modal close
     shareProgress: (text) => {
       setSharedUpdates(list => [...list, { id: Date.now(), text }]);
     },
@@ -3439,7 +3322,7 @@ export default function GroveApp() {
       const today = isoDate(new Date());
       const next = !bonusDone;
       setBonusDone(next);
-      setPoints(p => Math.max(0, p + (next ? 15 : -15) * pointsMult));
+      setPoints(p => Math.max(0, p + (next ? 15 : -15)));
       if (!SPARKS_ENABLED) return;
       if (next) {
         if (lastSparkDate !== today) {
@@ -3455,24 +3338,24 @@ export default function GroveApp() {
     },
     setBonusCategory: (cat) => {
       setBonusCategoryState(cat);
-      if (bonusDone) setPoints(p => Math.max(0, p - 15 * pointsMult));
+      if (bonusDone) setPoints(p => Math.max(0, p - 15));
       setBonusDone(false);
     },
-    plantFlower: async () => {
+    plantFlower: () => {
       const currentFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
       if (currentFlowers <= 0) return;
       if (placedItems.some(it => it.type === "frienddragon")) return; // max 1 dragon, ever
-      if (auth.user) { if (!(await auth.adjustFlowers(-1))) return; } else { setFlowers(f => Math.max(0, f - 1)); }
+      if (auth.user) { auth.adjustFlowers(-1); } else { setFlowers(f => Math.max(0, f - 1)); }
       setPlacedItems(list => [...list, {
         id: "dragon-" + Date.now(), type: "frienddragon", emoji: "🐲",
         world: WORLD_BY_ENV[environment] || "land",
         x: 30 + Math.random() * 40, y: 55 + Math.random() * 20,
       }]);
     },
-    removeDragon: async () => {
+    removeDragon: () => {
       if (!placedItems.some(it => it.type === "frienddragon")) return;
-      if (auth.user) { if (!(await auth.adjustFlowers(1))) return; } else { setFlowers(f => f + 1); }
       setPlacedItems(list => list.filter(it => it.type !== "frienddragon"));
+      if (auth.user) { auth.adjustFlowers(1); } else { setFlowers(f => f + 1); }
     },
     buyShiny: (shopId, cost) => {
       if (shinyUnlocked.includes(shopId)) return;
@@ -3488,17 +3371,16 @@ export default function GroveApp() {
       if (auth.user) { auth.adjustSparks(-cost); } else { setSparks(s => Math.max(0, s - cost)); }
       setShinyUnlocked(list => [...list, shopId]);
     },
-    toggleRainbow: (shopId) => {
-      if (!(CREATOR_MODE_ENABLED && creatorMode) && !(auth.user && auth.profile && auth.profile.pro)) { setShowPaywall(true); return; }
-      setRainbowOn(list => list.includes(shopId) ? list.filter(id => id !== shopId) : [...list, shopId]);
-    },
     toggleShinyVisible: (shopId) => {
       setShinyHidden(list => list.includes(shopId) ? list.filter(id => id !== shopId) : [...list, shopId]);
     },
     ensureLifetimeOfferStarted: () => {
       setLifetimeOfferExpiresAt(prev => prev !== null ? prev : Date.now() + LIFETIME_OFFER_MS);
     },
-    subscribeToPlan: () => {}, // real Pro only comes from a paid Stripe checkout
+    subscribeToPlan: (planId) => {
+      setPro(true);
+      setProPlan(planId);
+    },
     startCheckout: async (planId) => {
       if (!auth.user || !auth.session?.access_token) return;
       try {
@@ -3593,13 +3475,16 @@ export default function GroveApp() {
 
   // Once signed in, real Pro status comes from the database (set by the Stripe webhook)
   // rather than the local demo toggle. Creator Mode always overrides, for testing.
-  const effectivePro = (CREATOR_MODE_ENABLED && creatorMode) ? true : !!(auth.user && auth.profile && auth.profile.pro);
-  const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : null;
+  const effectivePro = creatorMode ? true : (auth.user && auth.profile ? auth.profile.pro : pro);
+  const effectiveProPlan = auth.user && auth.profile ? auth.profile.pro_plan : proPlan;
   const effectiveSparks = creatorMode ? sparks : (auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks);
   const effectiveFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
 
+  const guideStats = guideProgress({ positive: positiveDerived, negative: negativeDerived, placedItems, plannerItems, unlocked, unlockedEnvs }, visitedPages);
+
   const state = {
-    page, pro: effectivePro, points, flowers: effectiveFlowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, rainbowOn, pointsMult, positive: positiveDerived, negative: negativeDerived, friends,
+    guideStats,
+    page, pro: effectivePro, points, flowers: effectiveFlowers, sparks: effectiveSparks, shinyUnlocked, shinyHidden, positive: positiveDerived, negative: negativeDerived, friends,
     unlocked, hiddenFeatureIds, unlockedEnvs, environment, placedItems, fogLevel,
     sharedUpdates, plannerItems,
     showResetConfirm, showFeedback, feedbackType, feedbackDraft, feedbackSubmitted, bonusDone, bonusCategory, confettiEnabled, leaderboardHidden,
@@ -3629,7 +3514,7 @@ export default function GroveApp() {
         "--parchment-50":"#faf6ee", "--parchment-100":"#f2ecdd", "--bark-700":"#6b4423",
         "--bark-900":"#3f2a17", "--fog-white":"rgba(250,246,238,0.7)",
         "--shadow-soft":"0 8px 24px rgba(15,35,24,0.18)", "--shadow-card":"0 2px 10px rgba(15,35,24,0.08)",
-        width: "100%", boxSizing: "border-box", maxWidth: 1000, margin: "0 auto", minHeight: "100vh", background: "#f6f1e6",
+        maxWidth: 1000, margin: "0 auto", minHeight: "100vh", background: "#f6f1e6",
         fontFamily: "'Manrope', sans-serif", position: "relative",
       }}>
       {detailHabit ? (
@@ -3644,14 +3529,30 @@ export default function GroveApp() {
         </div>
       )}
       <TabBar page={page} setPage={setPage} />
-      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={(planId) => { if (auth.user) { actions.startCheckout(planId); } else { setPage("plans"); } }} />}
+      {showWelcome && !guideTab && !showQuoteOfDay && (
+        <WelcomeCard
+          onTour={() => { dismissWelcome(); setGuideTab("tour"); }}
+          onQuests={() => { dismissWelcome(); setGuideTab("quests"); }}
+          onDismiss={dismissWelcome}
+        />
+      )}
+      {guideTab && (
+        <GuideModal
+          tab={guideTab}
+          onTab={setGuideTab}
+          onClose={() => setGuideTab(null)}
+          state={{ positive: positiveDerived, negative: negativeDerived, placedItems, plannerItems, unlocked, unlockedEnvs }}
+          visited={visitedPages}
+        />
+      )}
+      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={actions.applySubscription} />}
 
       {/* invisible tap zone — tap 7 times fast to reveal Creator Mode; nothing shows here otherwise */}
       <div onClick={handleSecretTap} style={{
         position: "fixed", top: 0, left: 0, width: 44, height: 44, zIndex: 70, cursor: "default",
       }} />
 
-      {CREATOR_MODE_ENABLED && creatorAccessUnlocked && (
+      {creatorAccessUnlocked && (
         <button onClick={toggleCreatorMode} title="Creator mode: free Pro + unlimited points, just for you" style={{
           position: "fixed", top: 14, right: 14, zIndex: 60, border: "none", cursor: "pointer",
           display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 999,
