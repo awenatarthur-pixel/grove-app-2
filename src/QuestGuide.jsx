@@ -82,7 +82,7 @@ const TOUR = [
 
 /* ------------------------------ UI bits --------------------------------- */
 
-export function GuideButton({ onClick, doneCount, total }) {
+export function GuideButton({ onClick, doneCount, total, claimable = 0 }) {
   return (
     <button onClick={onClick} aria-label="Open guide" style={{
       display: "flex", alignItems: "center", gap: 6, border: "none", cursor: "pointer",
@@ -97,40 +97,37 @@ export function GuideButton({ onClick, doneCount, total }) {
           {doneCount}/{total}
         </span>
       )}
+      {claimable > 0 && (
+        <span style={{ background: "var(--gold-500)", color: "var(--forest-950)", borderRadius: 999, padding: "1px 7px", fontSize: 11 }}>
+          🎁 {claimable}
+        </span>
+      )}
     </button>
   );
 }
 
-// Small one-time card shown only to first-time users. Easy to dismiss.
+// Small one-time card shown only to first-time users. Compact and easy to dismiss.
 export function WelcomeCard({ onTour, onQuests, onDismiss }) {
   return (
     <div style={{
-      position: "fixed", left: 12, right: 12, bottom: "calc(76px + env(safe-area-inset-bottom))",
+      position: "fixed", left: 12, right: 12, bottom: "calc(74px + env(safe-area-inset-bottom))",
       maxWidth: 560, margin: "0 auto", zIndex: 45,
       background: "var(--forest-900)", color: "var(--parchment-50)",
-      borderRadius: 18, padding: "16px 16px 14px", boxShadow: "var(--shadow-soft)",
+      borderRadius: 16, padding: "10px 12px", boxShadow: "var(--shadow-soft)",
+      display: "flex", alignItems: "center", gap: 8,
     }}>
-      <button onClick={onDismiss} aria-label="Dismiss" style={{
-        position: "absolute", top: 10, right: 10, border: "none", background: "none", cursor: "pointer", color: "var(--moss-400)", display: "flex",
+      <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13, flex: 1, minWidth: 0 }}>New to Grove? 🌱</div>
+      <button onClick={onTour} style={{
+        border: "none", cursor: "pointer", borderRadius: 10, padding: "8px 11px",
+        background: "var(--gold-500)", color: "var(--forest-950)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12,
+      }}>▶ Tour</button>
+      <button onClick={onQuests} style={{
+        border: "1px solid rgba(250,246,238,0.35)", cursor: "pointer", borderRadius: 10, padding: "7px 11px",
+        background: "transparent", color: "var(--parchment-50)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12,
+      }}>Quests</button>
+      <button onClick={onDismiss} aria-label="No thanks" style={{
+        border: "none", background: "none", cursor: "pointer", color: "var(--moss-400)", display: "flex", padding: 4,
       }}><X size={16} /></button>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 18, marginBottom: 4 }}>New to Grove? 🌱</div>
-      <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, opacity: 0.9, marginBottom: 12, lineHeight: 1.45 }}>
-        Watch a one-minute tour, or open the Quest Log for small goals. It's optional.
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={onTour} style={{
-          border: "none", cursor: "pointer", borderRadius: 12, padding: "10px 14px",
-          background: "var(--gold-500)", color: "var(--forest-950)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13,
-        }}>▶ Watch the tour</button>
-        <button onClick={onQuests} style={{
-          border: "1px solid rgba(250,246,238,0.35)", cursor: "pointer", borderRadius: 12, padding: "10px 14px",
-          background: "transparent", color: "var(--parchment-50)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13,
-        }}>Quest Log</button>
-        <button onClick={onDismiss} style={{
-          border: "none", cursor: "pointer", background: "none", padding: "10px 6px",
-          color: "var(--moss-400)", fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13,
-        }}>No thanks</button>
-      </div>
     </div>
   );
 }
@@ -209,7 +206,7 @@ function ctrlBtn(disabled) {
   };
 }
 
-function QuestPane({ quests }) {
+function QuestPane({ quests, claimed, reward, onClaim }) {
   const doneCount = quests.filter(q => q.done).length;
   return (
     <div>
@@ -238,6 +235,18 @@ function QuestPane({ quests }) {
               }}>{q.title}</div>
               {!q.done && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--moss-600)", marginTop: 2 }}>{q.hint}</div>}
             </div>
+            <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+              {q.done && !claimed.includes(q.id) ? (
+                <button onClick={() => onClaim(q.id)} style={{
+                  border: "none", cursor: "pointer", borderRadius: 999, padding: "7px 12px",
+                  background: "var(--gold-500)", color: "var(--forest-950)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 12,
+                }}>Claim +{reward}</button>
+              ) : q.done ? (
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 11, color: "var(--moss-600)" }}>Claimed ✓</span>
+              ) : (
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 11, color: "var(--gold-600)" }}>+{reward}</span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -246,7 +255,7 @@ function QuestPane({ quests }) {
 }
 
 // The guide itself: one panel with two tabs, Quest Log and Tour.
-export function GuideModal({ tab, onTab, onClose, state, visited }) {
+export function GuideModal({ tab, onTab, onClose, state, visited, claimed = [], reward = 300, onClaim = () => {} }) {
   const quests = buildQuests(state, visited);
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
@@ -275,20 +284,4 @@ export function GuideModal({ tab, onTab, onClose, state, visited }) {
           <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 22, color: "var(--forest-900)", margin: 0 }}>Grove guide</h2>
           <button onClick={onClose} aria-label="Close" style={{
             border: "none", background: "var(--parchment-100)", borderRadius: "50%", width: 32, height: 32, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--forest-900)",
-          }}><X size={16} /></button>
-        </div>
-        <div style={{ display: "flex", gap: 4, background: "var(--parchment-100)", borderRadius: 12, padding: 4, marginBottom: 16 }}>
-          {tabBtn("quests", "Quest Log", ScrollText)}
-          {tabBtn("tour", "Watch the tour", Play)}
-        </div>
-        {tab === "tour" ? <TourPane /> : <QuestPane quests={quests} />}
-      </div>
-    </div>
-  );
-}
-
-export function guideProgress(state, visited) {
-  const q = buildQuests(state, visited);
-  return { done: q.filter(x => x.done).length, total: q.length };
-}
+            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--fo
