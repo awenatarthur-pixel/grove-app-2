@@ -166,7 +166,10 @@ const FRIENDS = [
   { id: "f3", name: "Sam", note: "finally beat the late-night scrolling habit", kudos: 1, avatar: "🌙" },
 ];
 
-const SHOP_ITEMS = [
+// Everything in the shop is half price. Change SHOP_DISCOUNT to adjust (1 = full price).
+const SHOP_DISCOUNT = 0.5;
+const QUEST_REWARD = 300; // points for each completed quest in the Guide
+const SHOP_ITEMS_FULL_PRICE = [
   // --- Land (Meadow / Misty Forest / Sunset Cliffs) ---
   { id: "tree", label: "Tree", emoji: "🌳", cost: 60, type: "decor", world: "land" },
   { id: "waterfall", label: "Stream", emoji: "💦", cost: 220, type: "feature", world: "land" },
@@ -202,8 +205,9 @@ const SHOP_ITEMS = [
   { id: "octopus", label: "Octopus", emoji: "🐙", cost: 260, type: "animal", world: "cave" },
   { id: "seahorse", label: "Seahorse", emoji: "🦄", cost: 150, type: "animal", world: "cave" },
 ];
+const SHOP_ITEMS = SHOP_ITEMS_FULL_PRICE.map(item => ({ ...item, cost: Math.round(item.cost * SHOP_DISCOUNT) }));
 
-const ENVIRONMENTS = [
+const ENVIRONMENTS_FULL_PRICE = [
   // --- Land world: the original 3 upgrades ---
   { id: "meadow", world: "land", label: "Meadow", icon: "🌾", cost: 0, sky: ["#bfe3c9", "#eef7d8"], ground: ["#8fbf7a", "#6fa363"] },
   { id: "mist", world: "land", label: "Misty Forest", icon: "🌫️", cost: 320, sky: ["#9fb8ad", "#dfe9e2"], ground: ["#8fbf7a", "#6fa363"] },
@@ -219,6 +223,7 @@ const ENVIRONMENTS = [
   { id: "cave-reef", world: "cave", label: "Coral Reef", icon: "🪸", cost: 1100, sky: ["#0e4a5c", "#3fa8b5"], ground: ["#e0c9a0", "#c7a878"], effect: "bubbles" },
   { id: "cave-trench", world: "cave", label: "Abyssal Trench", icon: "🌑", cost: 1450, sky: ["#050f1a", "#12303f"], ground: ["#4a4438", "#2a2620"], effect: "bubbles" },
 ];
+const ENVIRONMENTS = ENVIRONMENTS_FULL_PRICE.map(env => ({ ...env, cost: Math.round(env.cost * SHOP_DISCOUNT) }));
 
 const WORLD_BY_ENV = Object.fromEntries(ENVIRONMENTS.map(e => [e.id, e.world]));
 const WORLD_ORDER = ["land", "rainforest", "cave"];
@@ -379,7 +384,7 @@ const SPARKS_ENABLED = false;
 // Creator Mode (free Pro + unlimited points via a secret tap) is OFF for launch. Set true only for private testing.
 const CREATOR_MODE_ENABLED = false;
 const AI_ADVISER_ENABLED = false;
-const SHINY_POINT_COST = 300; // shiny skins are bought with points while Sparks are off
+const SHINY_POINT_COST = Math.round(300 * SHOP_DISCOUNT); // shiny skins are bought with points while Sparks are off
 const LIFETIME_OFFER_MS = 60 * 1000;
 
 /* -------------------------------------------------------------------------
@@ -494,13 +499,13 @@ function ProBadge() {
 
 function SectionLabel({ label, icon, sub }) {
   return (
-    <div style={{ padding: "14px 20px 10px" }}>
+    <div style={{ padding: "22px 20px 12px" }}>
       <div style={{
         display: "flex", alignItems: "center", gap: 6, color: "var(--moss-600)",
-        fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12,
-        textTransform: "uppercase", letterSpacing: "0.06em",
+        fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13,
+        textTransform: "uppercase", letterSpacing: "0.05em",
       }}>{icon}{label}</div>
-      {sub && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", marginTop: 3 }}>{sub}</div>}
+      {sub && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, lineHeight: 1.4, color: "var(--bark-700)", marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -605,7 +610,7 @@ function HabitTracker({ state, actions }) {
     <div style={{ paddingBottom: 100 }}>
       <TopBar title="Your habits" right={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {state.guideStats && <GuideButton onClick={() => actions.openGuide("quests")} doneCount={state.guideStats.done} total={state.guideStats.total} />}
+          {state.guideStats && <GuideButton onClick={() => actions.openGuide("quests")} doneCount={state.guideStats.done} total={state.guideStats.total} claimable={state.guideStats.claimable} />}
           <PointsPill points={points} />
         </div>
       } />
@@ -621,7 +626,7 @@ function HabitTracker({ state, actions }) {
             <Crown size={18} color="var(--gold-500)" />
             <div>
               <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 14 }}>Go unlimited with Pro</div>
-              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, opacity: 0.85 }}>{PRO_PRICE}/month · cancel anytime</div>
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, opacity: 0.85 }}>{state.authUser ? `${PRO_PRICE}/month · cancel anytime` : "Create a free account to see plans"}</div>
             </div>
           </div>
           <ChevronRight size={18} />
@@ -2119,6 +2124,7 @@ function AnimalCompendium({ state, onBack }) {
    PAGE 3 — Progress: chart, streak, objectives, sharing, leaderboard
 ------------------------------------------------------------------------- */
 function StatsPage({ state, actions }) {
+  const [showFocus, setShowFocus] = useState(false);
   const weekDates = currentWeekDates();
   const chartData = weekDates.map((d) => {
     const iso = isoDate(d);
@@ -2237,20 +2243,38 @@ function StatsPage({ state, actions }) {
         </button>
       </div>
 
+      {!state.authUser && (
+        <div style={{
+          margin: "4px 20px 0", padding: "14px 16px", borderRadius: 16,
+          background: "rgba(233,196,106,0.18)", border: "1.5px solid rgba(212,168,74,0.35)",
+        }}>
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, color: "var(--forest-900)", marginBottom: 4 }}>
+            Your habits are saved on this phone only
+          </div>
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, lineHeight: 1.45, color: "var(--bark-700)", marginBottom: 10 }}>
+            Sign in with your email to keep them safe and use Grove on any device. It's free.
+          </div>
+          <button onClick={actions.goToSignIn} style={{
+            border: "none", cursor: "pointer", borderRadius: 12, padding: "10px 16px",
+            background: "var(--forest-900)", color: "var(--gold-500)", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 13,
+          }}>Sign in to save your progress</button>
+        </div>
+      )}
+
       <SectionLabel label="Today's objectives" icon={<ListTodo size={14} />} sub={FRIENDS_ENABLED ? `${doneCount}/${totalCount} done — visible to friends only if you choose to share` : `${doneCount}/${totalCount} done today`} />
-      <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: 10 }}>
         {state.positive.map(h => (
           <div key={h.id} onClick={() => actions.toggleToday(h.id)} style={{
-            display: "flex", alignItems: "center", gap: 10, background: "var(--parchment-50)",
-            borderRadius: 12, padding: "10px 12px", boxShadow: "var(--shadow-card)", cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 12, background: "var(--parchment-50)",
+            borderRadius: 14, padding: "14px 14px", boxShadow: "var(--shadow-card)", cursor: "pointer",
           }}>
             <div style={{
-              width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+              width: 24, height: 24, borderRadius: 7, flexShrink: 0,
               background: h.doneToday ? "var(--moss-600)" : "var(--parchment-100)",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>{h.doneToday && <Check size={13} color="#fff" strokeWidth={3} />}</div>
             <span style={{
-              fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: "var(--forest-900)",
+              fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 15, color: "var(--forest-900)",
               textDecoration: h.doneToday ? "line-through" : "none", opacity: h.doneToday ? 0.6 : 1,
             }}>{h.name}</span>
           </div>
@@ -2273,9 +2297,14 @@ function StatsPage({ state, actions }) {
         )}
       </div>
 
-      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub={SPARKS_ENABLED ? "A small daily push, your pick of focus — optional, +15 pts + 1 Spark" : `A small daily push, your pick of focus — optional, +${15 * (state.pointsMult || 1)} pts`} />
+      <SectionLabel label="Bonus objective" icon={<Sparkles size={14} />} sub={SPARKS_ENABLED ? "Optional · +15 pts + 1 Spark" : `Optional · +${15 * (state.pointsMult || 1)} pts`} />
       <div style={{ padding: "0 20px 4px" }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <button onClick={() => setShowFocus(v => !v)} style={{
+          display: "flex", alignItems: "center", gap: 6, border: "none", background: "none", cursor: "pointer", padding: "0 2px 10px",
+          fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--moss-600)",
+        }}>Focus: {BONUS_CATEGORIES[state.bonusCategory]?.icon} {BONUS_CATEGORIES[state.bonusCategory]?.label} · {showFocus ? "hide" : "change"}</button>
+        {showFocus && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
           {Object.entries(BONUS_CATEGORIES).map(([key, cat]) => (
             <button key={key} onClick={() => actions.setBonusCategory(key)} style={{
               flex: 1, padding: "8px 6px", borderRadius: 12, border: "none", cursor: "pointer",
@@ -2285,6 +2314,7 @@ function StatsPage({ state, actions }) {
             }}>{cat.icon} {cat.label}</button>
           ))}
         </div>
+        )}
         <div onClick={actions.toggleBonusObjective} style={{
           display: "flex", alignItems: "center", gap: 12, cursor: "pointer",
           background: "linear-gradient(120deg, rgba(233,196,106,0.18), rgba(236,138,114,0.14))",
@@ -2297,7 +2327,7 @@ function StatsPage({ state, actions }) {
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>{state.bonusDone && <Check size={15} color="#fff" strokeWidth={3} />}</div>
           <span style={{
-            fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 13, color: "var(--forest-900)",
+            fontFamily: "'Manrope', sans-serif", fontWeight: 600, fontSize: 15, color: "var(--forest-900)", lineHeight: 1.4,
             textDecoration: state.bonusDone ? "line-through" : "none", opacity: state.bonusDone ? 0.6 : 1,
           }}>{dailyBonusObjective(state.bonusCategory)}</span>
         </div>
@@ -2363,9 +2393,11 @@ function StatsPage({ state, actions }) {
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'Manrope', sans-serif", fontSize: 12, color: "var(--bark-700)", padding: "4px 2px" }}>
-          🐲 {state.flowers} friendly dragon{state.flowers === 1 ? "" : "s"} collected
-        </div>
+        {state.flowers > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'Manrope', sans-serif", fontSize: 13, color: "var(--bark-700)", padding: "4px 2px" }}>
+            🐲 {state.flowers} friendly dragon{state.flowers === 1 ? "" : "s"} collected
+          </div>
+        )}
       </div>
 
       {confirmShare && (
@@ -2562,7 +2594,7 @@ function PlansPage({ state, actions }) {
     setPortalLoading(false);
   };
 
-  useEffect(() => { actions.ensureLifetimeOfferStarted(); }, []);
+  useEffect(() => { if (state.authUser) actions.ensureLifetimeOfferStarted(); }, [state.authUser]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -2613,6 +2645,29 @@ function PlansPage({ state, actions }) {
       setAiLoading(false);
     }
   };
+
+  if (!state.authUser) {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <TopBar title="Plans" right={null} />
+        <div style={{ padding: "0 20px" }}>
+          <div style={{ background: "var(--parchment-50)", borderRadius: 18, padding: "18px 16px", boxShadow: "var(--shadow-card)", marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <Crown size={18} color="var(--gold-600)" />
+              <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 19, color: "var(--forest-900)" }}>Create your free account</div>
+            </div>
+            <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, lineHeight: 1.5, color: "var(--bark-900)", margin: "0 0 12px" }}>
+              Add your email and we'll send you a link to confirm. Your habits are saved safely, and you can see the Pro plans straight after.
+            </p>
+            <ul style={{ margin: "0 0 4px", paddingLeft: 18, fontFamily: "'Manrope', sans-serif", fontSize: 13, lineHeight: 1.7, color: "var(--bark-700)" }}>
+              <li>Unlimited habits</li><li>2× points</li><li>Rainbow skins and more</li>
+            </ul>
+          </div>
+          <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ paddingBottom: 100 }}>
@@ -2756,6 +2811,27 @@ function PlansPage({ state, actions }) {
       </>
       )}
     </div>
+  );
+}
+
+// Asks for an email sign-up BEFORE any pricing is shown, and once after someone's first couple of habits.
+function SignupGate({ reason, onClose, authUser, signInWithEmail, signOut }) {
+  const gateRef = useRef(null);
+  const fromHabits = reason === "habits";
+  return (
+    <Modal ref={gateRef} onClose={onClose}>
+      <h3 style={modalTitleStyle}>{fromHabits ? "Nice start! Save your habits 🌱" : "Create your free account first"}</h3>
+      <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, lineHeight: 1.5, color: "var(--bark-900)", margin: "0 0 14px" }}>
+        {fromHabits
+          ? "Add your email and we'll send you a link to confirm your account. Your habits are then saved safely and work on any device. It's free."
+          : "Add your email and we'll send you a link to confirm your account. Then you can see the Pro plans, and your progress stays safe."}
+      </p>
+      <AuthPanel user={authUser} signInWithEmail={signInWithEmail} signOut={signOut} />
+      <button onClick={() => gateRef.current && gateRef.current.requestClose()} style={{
+        width: "100%", border: "none", background: "none", cursor: "pointer", padding: "12px 0 0",
+        fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--moss-600)",
+      }}>Maybe later</button>
+    </Modal>
   );
 }
 
@@ -2928,6 +3004,7 @@ export default function GroveApp() {
   const [shinyHidden, setShinyHidden] = useState([]);
   const [rainbowOn, setRainbowOn] = useState([]); // animals with the Pro rainbow skin switched on
   const [showPaywall, setShowPaywall] = useState(false);
+  const [signupGate, setSignupGate] = useState(null); // null | 'habits' | 'pricing'
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [bonusDone, setBonusDone] = useState(false);
@@ -2961,6 +3038,8 @@ export default function GroveApp() {
   // Optional guide (quest log + tour): closed unless the person opens it
   const [guideTab, setGuideTab] = useState(null); // null | 'quests' | 'tour'
   const visitedPages = useVisitedPages(page);
+  const [claimedQuests, setClaimedQuests] = useState([]);
+  const claimedQuestsRef = useRef([]);
   const [showWelcome, dismissWelcome] = useWelcomeCard();
 
   // If we've just come back from a successful Stripe checkout, refresh the
@@ -3068,6 +3147,7 @@ export default function GroveApp() {
     if (data.sharedUpdates !== undefined) setSharedUpdates(data.sharedUpdates);
     if (data.plannerItems !== undefined) setPlannerItems(data.plannerItems);
     if (data.placedItems !== undefined) setPlacedItems(data.placedItems);
+    if (Array.isArray(data.claimedQuests)) { setClaimedQuests(data.claimedQuests); claimedQuestsRef.current = data.claimedQuests; }
   };
 
   // Load any previously saved progress once, on first mount.
@@ -3093,7 +3173,7 @@ export default function GroveApp() {
     const payload = {
       pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, rainbowOn, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
       feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-      environment, sharedUpdates, plannerItems, placedItems, historyAnchor,
+      environment, sharedUpdates, plannerItems, placedItems, historyAnchor, claimedQuests,
     };
     setSaveStatus("saving");
     const t = setTimeout(async () => {
@@ -3119,7 +3199,7 @@ export default function GroveApp() {
   }, [
     saveLoaded, pro, creatorMode, creatorAccessUnlocked, points, flowers, sparks, shinyUnlocked, shinyHidden, rainbowOn, bonusDone, bonusCategory, lastSparkDate, lifetimeOfferExpiresAt, proPlan, confettiEnabled, leaderboardHidden,
     feedbackSubmitted, positive, negative, friends, unlocked, hiddenFeatureIds, unlockedEnvs,
-    environment, sharedUpdates, plannerItems, placedItems, historyAnchor, cloudReadyFor, auth.user,
+    environment, sharedUpdates, plannerItems, placedItems, historyAnchor, claimedQuests, cloudReadyFor, auth.user,
   ]);
 
   // When someone signs in, load their saved grove from their account (or start saving this device's grove to it).
@@ -3227,8 +3307,16 @@ export default function GroveApp() {
   const pointsMult = (CREATOR_MODE_ENABLED && creatorMode) || (auth.user && auth.profile && auth.profile.pro) ? 2 : 1;
 
   const actions = {
-    openPaywall: () => setShowPaywall(true),
+    // Pricing is only shown to people who already have an account; everyone else is asked to sign up first.
+    openPaywall: () => { if (auth.user) setShowPaywall(true); else setSignupGate("pricing"); },
     openGuide: (tab) => setGuideTab(tab || "quests"),
+    goToSignIn: () => setPage("plans"),
+    claimQuest: (id) => {
+      if (claimedQuestsRef.current.includes(id)) return; // already claimed: never pay twice
+      claimedQuestsRef.current = [...claimedQuestsRef.current, id];
+      setClaimedQuests(claimedQuestsRef.current);
+      setPoints(p => p + QUEST_REWARD);
+    },
     openHabitDetail: (id) => setDetailHabitId(id),
     closeHabitDetail: () => setDetailHabitId(null),
     toggleDay: (id, iso) => {
@@ -3290,6 +3378,13 @@ export default function GroveApp() {
       } else {
         setNegative(list => [...list, { id: "n" + Date.now(), name, target: 4, history: new Array(HISTORY_LEN).fill(0) }]);
       }
+      // After their first couple of habits, take people to sign-up once (never nag again if they say "maybe later").
+      try {
+        if (!auth.user && positive.length + negative.length + 1 >= 2 && window.localStorage.getItem("grove_signup_prompted") !== "1") {
+          window.localStorage.setItem("grove_signup_prompted", "1");
+          setTimeout(() => setSignupGate("habits"), 400);
+        }
+      } catch (err) {}
     },
     deleteHabit: (kind, id) => {
       if (kind === "positive") setPositive(list => list.filter(h => h.id !== id));
@@ -3500,7 +3595,7 @@ export default function GroveApp() {
       setShinyUnlocked(list => [...list, shopId]);
     },
     toggleRainbow: (shopId) => {
-      if (!(CREATOR_MODE_ENABLED && creatorMode) && !(auth.user && auth.profile && auth.profile.pro)) { setShowPaywall(true); return; }
+      if (!(CREATOR_MODE_ENABLED && creatorMode) && !(auth.user && auth.profile && auth.profile.pro)) { if (auth.user) setShowPaywall(true); else setSignupGate("pricing"); return; }
       setRainbowOn(list => list.includes(shopId) ? list.filter(id => id !== shopId) : [...list, shopId]);
     },
     toggleShinyVisible: (shopId) => {
@@ -3609,7 +3704,7 @@ export default function GroveApp() {
   const effectiveSparks = creatorMode ? sparks : (auth.user && auth.profile ? (auth.profile.sparks || 0) : sparks);
   const effectiveFlowers = auth.user && auth.profile ? (auth.profile.flowers || 0) : flowers;
 
-  const guideStats = guideProgress({ positive: positiveDerived, negative: negativeDerived, placedItems, plannerItems, unlocked, unlockedEnvs }, visitedPages);
+  const guideStats = guideProgress({ positive: positiveDerived, negative: negativeDerived, placedItems, plannerItems, unlocked, unlockedEnvs }, visitedPages, claimedQuests);
 
   const state = {
     guideStats,
@@ -3672,7 +3767,13 @@ export default function GroveApp() {
           onClose={() => setGuideTab(null)}
           state={{ positive: positiveDerived, negative: negativeDerived, placedItems, plannerItems, unlocked, unlockedEnvs }}
           visited={visitedPages}
+          claimed={claimedQuests}
+          reward={QUEST_REWARD}
+          onClaim={actions.claimQuest}
         />
+      )}
+      {signupGate && !auth.user && (
+        <SignupGate reason={signupGate} onClose={() => setSignupGate(null)} authUser={auth.user} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
       )}
       {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={(planId) => { if (auth.user) { actions.startCheckout(planId); } else { setPage("plans"); } }} />}
 
@@ -3701,7 +3802,7 @@ export default function GroveApp() {
           fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10,
           boxShadow: "var(--shadow-card)", pointerEvents: "none",
         }}>
-          {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : "Save failed"}
+          {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? (auth.user ? "Saved to your account ✓" : "Saved on this device ✓") : "Save failed"}
         </div>
       )}
 
