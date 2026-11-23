@@ -626,7 +626,7 @@ function HabitTracker({ state, actions }) {
             <Crown size={18} color="var(--gold-500)" />
             <div>
               <div style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 14 }}>Go unlimited with Pro</div>
-              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, opacity: 0.85 }}>{state.authUser ? `${PRO_PRICE}/month · cancel anytime` : "Create a free account to see plans"}</div>
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, opacity: 0.85 }}>{state.authUser ? (IS_STORE_APP ? "Coming soon to the App Store" : `${PRO_PRICE}/month · cancel anytime`) : "Create a free account to see plans"}</div>
             </div>
           </div>
           <ChevronRight size={18} />
@@ -2663,8 +2663,31 @@ function PlansPage({ state, actions }) {
               <li>Unlimited habits</li><li>2× points</li><li>Rainbow skins and more</li>
             </ul>
           </div>
-          <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+          <ConsentAuth user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
         </div>
+        <AccountLegalCard authUser={null} hasStripeCustomer={false} />
+      </div>
+    );
+  }
+
+  // Inside the iPhone/Android app, Pro is bought through the store, never Stripe.
+  if (IS_STORE_APP) {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <TopBar title="Plans" right={null} />
+        <div style={{ padding: "0 20px" }}>
+          <AuthPanel user={state.authUser} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+          <div style={{ background: "var(--parchment-50)", borderRadius: 18, padding: "18px 16px", boxShadow: "var(--shadow-card)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <Crown size={18} color="var(--gold-600)" />
+              <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 19, color: "var(--forest-900)" }}>Grove Pro</div>
+            </div>
+            <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, lineHeight: 1.5, color: "var(--bark-900)", margin: 0 }}>
+              {state.pro ? "You're on Grove Pro. Thank you! Manage your subscription in your Apple ID settings." : "Grove Pro will be available here soon, purchased securely through the App Store."}
+            </p>
+          </div>
+        </div>
+        <AccountLegalCard authUser={state.authUser} hasStripeCustomer={false} />
       </div>
     );
   }
@@ -2810,11 +2833,167 @@ function PlansPage({ state, actions }) {
       </div>
       </>
       )}
+      <AccountLegalCard authUser={state.authUser} hasStripeCustomer={state.hasStripeCustomer} />
+    </div>
+  );
+}
+
+
+// ---------- Store prep: contact details, legal pages, account tools ----------
+// CHANGE THIS to your real support address before submitting to the App Store.
+const SUPPORT_EMAIL = "support@grovehabits.app";
+// True only inside the iPhone/Android app (Capacitor). There, purchases must go through the store, never Stripe.
+const IS_STORE_APP = typeof window !== "undefined" && !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
+
+const LEGAL_UPDATED = "23 November 2026";
+const LEGAL_DOCS = {
+  privacy: {
+    title: "Privacy Policy",
+    sections: [
+      ["Who we are", "Grove is a habit-tracking app run by its founder (\"we\", \"us\"). You can contact us any time at " + SUPPORT_EMAIL + "."],
+      ["What we collect", "Your email address when you create an account; the habits, points, grove and planner entries you create in the app; your Pro status; and basic technical information such as your device type and how the app is used, so we can fix problems and improve Grove. If you tick the optional box, we also record that you agreed to receive emails about new Grove launches, tips and offers."],
+      ["How we use it", "To run your account and save your progress; to send sign-in and confirmation emails; to provide Grove Pro; to understand how the app is used and make it better; and, only if you opted in, to email you occasional tips and offers. You can unsubscribe from marketing emails at any time."],
+      ["Who we share it with", "We don't sell your data. We use trusted services to run Grove: Supabase (accounts and saved data), Resend (emails), Stripe (payments made on our website), Apple (purchases made in the iPhone app) and Vercel (hosting). They only process data on our behalf."],
+      ["How long we keep it", "While your account is open. If you delete your account (Plans tab > Delete my account), your account and saved data are permanently removed. Payment records may be kept by Stripe or Apple where the law requires."],
+      ["Your rights", "Under UK GDPR you can ask to see, correct, export or delete your data, object to marketing, or complain to the Information Commissioner's Office (ico.org.uk). Email " + SUPPORT_EMAIL + " and we'll help."],
+      ["Children", "Grove is not intended for children under 13, and we don't knowingly collect their data."],
+      ["Changes", "If we change this policy we'll update the date above. Last updated: " + LEGAL_UPDATED + "."],
+    ],
+  },
+  terms: {
+    title: "Terms of Use",
+    sections: [
+      ["Using Grove", "Grove is a personal habit-tracking app. You're responsible for your account and for keeping your sign-in email secure. Please use Grove lawfully and don't try to disrupt or misuse the service."],
+      ["Not advice", "Grove is for motivation and self-improvement. It isn't medical, psychological or financial advice."],
+      ["Grove Pro", "Pro is an optional paid subscription (monthly or yearly) that renews until cancelled. Bought on our website, it is billed by Stripe and you can manage or cancel it from the Plans tab. Bought in the iPhone app, it is billed and managed by Apple through your Apple ID subscription settings. Prices are shown before you pay."],
+      ["Refunds", "Refunds follow the rules of where you bought: Apple for App Store purchases, or us (email " + SUPPORT_EMAIL + ") for website purchases. Your statutory rights are not affected."],
+      ["Your content", "Your habits and entries belong to you. You let us store and process them so the app can work for you."],
+      ["Availability", "We work hard to keep Grove running but can't promise it will always be available or error-free. We may update or change features over time."],
+      ["Ending your account", "You can delete your account any time from the Plans tab. We may suspend accounts that break these terms."],
+      ["Contact", "Questions? Email " + SUPPORT_EMAIL + ". Last updated: " + LEGAL_UPDATED + "."],
+    ],
+  },
+};
+
+function LegalPage({ kind, onBack }) {
+  const doc = LEGAL_DOCS[kind];
+  if (!doc) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, overflowY: "auto", background: "#f6f1e6", fontFamily: "'Manrope', sans-serif" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 20px 60px" }}>
+        <button onClick={onBack} style={{ border: "none", background: "none", cursor: "pointer", padding: "6px 0", fontWeight: 700, fontSize: 13, color: "var(--moss-600)" }}>← Back to Grove</button>
+        <h1 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 28, color: "var(--forest-900)", margin: "10px 0 16px" }}>{doc.title}</h1>
+        {doc.sections.map(([h, body]) => (
+          <div key={h} style={{ marginBottom: 16 }}>
+            <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 17, color: "var(--forest-900)", margin: "0 0 4px" }}>{h}</h2>
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--bark-900)", margin: 0 }}>{body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function openLegal(kind) { try { window.location.hash = kind; } catch (e) {} }
+
+// Sign-up box with an optional (unticked) marketing-consent tick-box, as UK GDPR/PECR require.
+function ConsentAuth({ user, signInWithEmail, signOut }) {
+  const [consent, setConsent] = useState(false);
+  const toggle = (v) => { setConsent(v); try { window.localStorage.setItem("grove_marketing_consent", v ? "1" : "0"); } catch (e) {} };
+  return (
+    <div>
+      <AuthPanel user={user} signInWithEmail={signInWithEmail} signOut={signOut} />
+      {!user && (
+        <>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "2px 0 6px", cursor: "pointer", fontFamily: "'Manrope', sans-serif", fontSize: 12, lineHeight: 1.45, color: "var(--bark-700)" }}>
+            <input type="checkbox" checked={consent} onChange={e => toggle(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>Email me when Grove launches on the App Store, plus occasional tips and offers. You can unsubscribe any time.</span>
+          </label>
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: "var(--bark-700)", marginBottom: 4 }}>
+            By continuing you agree to our <a href="#terms" style={{ color: "var(--moss-600)", fontWeight: 700 }}>Terms</a> and <a href="#privacy" style={{ color: "var(--moss-600)", fontWeight: 700 }}>Privacy Policy</a>.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Privacy / Terms / Contact links, plus "Delete my account" for signed-in people.
+function AccountLegalCard({ authUser, hasStripeCustomer }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const delRef = useRef(null);
+  const linkStyle = { border: "none", background: "none", cursor: "pointer", padding: 0, fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 12, color: "var(--moss-600)", textDecoration: "underline" };
+  const doDelete = async () => {
+    setBusy(true); setErr("");
+    try {
+      const { error } = await supabase.rpc("delete_my_account");
+      if (error) throw error;
+      try { await supabase.auth.signOut(); } catch (e) {}
+      try { window.localStorage.clear(); } catch (e) {}
+      window.location.href = "/";
+    } catch (e) {
+      setBusy(false);
+      setErr("Sorry, we couldn't delete your account just now. Please email " + SUPPORT_EMAIL + " and we'll do it for you.");
+    }
+  };
+  return (
+    <div style={{ padding: "22px 20px 8px", textAlign: "center" }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
+        <button onClick={() => openLegal("privacy")} style={linkStyle}>Privacy Policy</button>
+        <button onClick={() => openLegal("terms")} style={linkStyle}>Terms of Use</button>
+        <a href={"mailto:" + SUPPORT_EMAIL} style={{ ...linkStyle, display: "inline-block" }}>Contact support</a>
+      </div>
+      {authUser && (
+        <button onClick={() => { setConfirming(true); setErr(""); }} style={{ ...linkStyle, color: "var(--blush-500)", fontSize: 11 }}>Delete my account</button>
+      )}
+      {confirming && (
+        <Modal ref={delRef} onClose={() => setConfirming(false)}>
+          <h3 style={modalTitleStyle}>Delete your account?</h3>
+          <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, lineHeight: 1.5, color: "var(--bark-900)", margin: "0 0 10px" }}>
+            This permanently deletes your account and all your saved habits, points and grove. It can't be undone.
+          </p>
+          {hasStripeCustomer && (
+            <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, lineHeight: 1.5, color: "var(--bark-700)", margin: "0 0 10px" }}>
+              Have a Pro subscription? Cancel it first with "Manage subscription" above, or you may keep being billed.
+            </p>
+          )}
+          {err && <p style={{ color: "var(--blush-500)", fontSize: 13, margin: "0 0 10px" }}>{err}</p>}
+          <button onClick={doDelete} disabled={busy} style={{
+            width: "100%", padding: "12px 14px", borderRadius: 12, border: "none", cursor: busy ? "default" : "pointer",
+            background: "var(--blush-500)", color: "#fff", fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: 14, opacity: busy ? 0.6 : 1,
+          }}>{busy ? "Deleting…" : "Yes, delete everything"}</button>
+          <button onClick={() => delRef.current && delRef.current.requestClose()} style={{
+            width: "100%", border: "none", background: "none", cursor: "pointer", padding: "12px 0 0",
+            fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--moss-600)",
+          }}>Keep my account</button>
+        </Modal>
+      )}
     </div>
   );
 }
 
 // Asks for an email sign-up BEFORE any pricing is shown, and once after someone's first couple of habits.
+// Website only: the app is free, but after a couple of habits you need to add an email to carry on.
+// Set REQUIRE_EMAIL_ON_WEB to false to make sign-up optional again. (Not used inside the iPhone app: Apple doesn't allow forced sign-up for features that work without an account.)
+const REQUIRE_EMAIL_ON_WEB = true;
+const GATE_AFTER_HABITS = 2;
+
+function SignupWall({ signInWithEmail, signOut }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 350, overflowY: "auto", background: "rgba(15,35,24,0.55)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 520, background: "var(--parchment-50)", borderRadius: "22px 22px 0 0", padding: "24px 20px 28px", boxShadow: "var(--shadow-soft)" }}>
+        <h3 style={{ ...modalTitleStyle, marginTop: 0 }}>Nice start! Keep your grove 🌱</h3>
+        <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, lineHeight: 1.5, color: "var(--bark-900)", margin: "0 0 14px" }}>
+          Grove is free. Just add your email to keep going. We'll send you a link to confirm, and your habits are then saved safely and work on any device. Already signed up? Use the same email.
+        </p>
+        <ConsentAuth user={null} signInWithEmail={signInWithEmail} signOut={signOut} />
+      </div>
+    </div>
+  );
+}
+
 function SignupGate({ reason, onClose, authUser, signInWithEmail, signOut }) {
   const gateRef = useRef(null);
   const fromHabits = reason === "habits";
@@ -2826,7 +3005,7 @@ function SignupGate({ reason, onClose, authUser, signInWithEmail, signOut }) {
           ? "Add your email and we'll send you a link to confirm your account. Your habits are then saved safely and work on any device. It's free."
           : "Add your email and we'll send you a link to confirm your account. Then you can see the Pro plans, and your progress stays safe."}
       </p>
-      <AuthPanel user={authUser} signInWithEmail={signInWithEmail} signOut={signOut} />
+      <ConsentAuth user={authUser} signInWithEmail={signInWithEmail} signOut={signOut} />
       <button onClick={() => gateRef.current && gateRef.current.requestClose()} style={{
         width: "100%", border: "none", background: "none", cursor: "pointer", padding: "12px 0 0",
         fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 13, color: "var(--moss-600)",
@@ -2986,7 +3165,7 @@ function TabBar({ page, setPage }) {
 /* -------------------------------------------------------------------------
    Root app
 ------------------------------------------------------------------------- */
-export default function GroveApp() {
+function GroveAppMain() {
   useFonts();
   const auth = useAuth();
   const [showQuoteOfDay, setShowQuoteOfDay] = useState(true);
@@ -3004,6 +3183,14 @@ export default function GroveApp() {
   const [shinyHidden, setShinyHidden] = useState([]);
   const [rainbowOn, setRainbowOn] = useState([]); // animals with the Pro rainbow skin switched on
   const [showPaywall, setShowPaywall] = useState(false);
+  useEffect(() => {
+    if (!auth.user) return;
+    let flag = null;
+    try { flag = window.localStorage.getItem("grove_marketing_consent"); } catch (e) {}
+    if (flag === null) return;
+    supabase.from("marketing_consent").upsert({ user_id: auth.user.id, consent: flag === "1", updated_at: new Date().toISOString() })
+      .then(({ error }) => { if (!error) { try { window.localStorage.removeItem("grove_marketing_consent"); } catch (e) {} } });
+  }, [auth.user && auth.user.id]);
   const [signupGate, setSignupGate] = useState(null); // null | 'habits' | 'pricing'
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -3308,7 +3495,7 @@ export default function GroveApp() {
 
   const actions = {
     // Pricing is only shown to people who already have an account; everyone else is asked to sign up first.
-    openPaywall: () => { if (auth.user) setShowPaywall(true); else setSignupGate("pricing"); },
+    openPaywall: () => { if (!auth.user) setSignupGate("pricing"); else if (IS_STORE_APP) setPage("plans"); else setShowPaywall(true); },
     openGuide: (tab) => setGuideTab(tab || "quests"),
     goToSignIn: () => setPage("plans"),
     claimQuest: (id) => {
@@ -3380,7 +3567,7 @@ export default function GroveApp() {
       }
       // After their first couple of habits, take people to sign-up once (never nag again if they say "maybe later").
       try {
-        if (!auth.user && positive.length + negative.length + 1 >= 2 && window.localStorage.getItem("grove_signup_prompted") !== "1") {
+        if (!(REQUIRE_EMAIL_ON_WEB && !IS_STORE_APP) && !auth.user && positive.length + negative.length + 1 >= 2 && window.localStorage.getItem("grove_signup_prompted") !== "1") {
           window.localStorage.setItem("grove_signup_prompted", "1");
           setTimeout(() => setSignupGate("habits"), 400);
         }
@@ -3595,7 +3782,7 @@ export default function GroveApp() {
       setShinyUnlocked(list => [...list, shopId]);
     },
     toggleRainbow: (shopId) => {
-      if (!(CREATOR_MODE_ENABLED && creatorMode) && !(auth.user && auth.profile && auth.profile.pro)) { if (auth.user) setShowPaywall(true); else setSignupGate("pricing"); return; }
+      if (!(CREATOR_MODE_ENABLED && creatorMode) && !(auth.user && auth.profile && auth.profile.pro)) { if (!auth.user) setSignupGate("pricing"); else if (IS_STORE_APP) setPage("plans"); else setShowPaywall(true); return; }
       setRainbowOn(list => list.includes(shopId) ? list.filter(id => id !== shopId) : [...list, shopId]);
     },
     toggleShinyVisible: (shopId) => {
@@ -3772,10 +3959,13 @@ export default function GroveApp() {
           onClaim={actions.claimQuest}
         />
       )}
-      {signupGate && !auth.user && (
+      {REQUIRE_EMAIL_ON_WEB && !IS_STORE_APP && !auth.loading && !auth.user && positive.length + negative.length >= GATE_AFTER_HABITS && (
+        <SignupWall signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
+      )}
+      {signupGate && !auth.user && !(REQUIRE_EMAIL_ON_WEB && !IS_STORE_APP && positive.length + negative.length >= GATE_AFTER_HABITS) && (
         <SignupGate reason={signupGate} onClose={() => setSignupGate(null)} authUser={auth.user} signInWithEmail={actions.signInWithEmail} signOut={actions.signOut} />
       )}
-      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={(planId) => { if (auth.user) { actions.startCheckout(planId); } else { setPage("plans"); } }} />}
+      {showPaywall && !IS_STORE_APP && <Paywall onClose={() => setShowPaywall(false)} onSubscribe={(planId) => { if (auth.user) { actions.startCheckout(planId); } else { setPage("plans"); } }} />}
 
       {/* invisible tap zone — tap 7 times fast to reveal Creator Mode; nothing shows here otherwise */}
       <div onClick={handleSecretTap} style={{
@@ -3833,6 +4023,44 @@ export default function GroveApp() {
         </Modal>
       )}
       </div>
+    </>
+  );
+}
+
+
+// Installable-app tags (icon, name, colour) are added here so index.html doesn't need touching.
+function addHeadTags() {
+  try {
+    const add = (tag, attrs) => {
+      const sel = tag + Object.keys(attrs).filter(k => k !== "content").map(k => `[${k}="${attrs[k]}"]`).join("");
+      if (document.head.querySelector(sel)) return;
+      const el = document.createElement(tag); Object.keys(attrs).forEach(k => el.setAttribute(k, attrs[k])); document.head.appendChild(el);
+    };
+    add("link", { rel: "manifest", href: "/manifest.webmanifest" });
+    add("link", { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" });
+    add("link", { rel: "icon", type: "image/png", href: "/icons/icon-192.png" });
+    add("meta", { name: "theme-color", content: "#153826" });
+    add("meta", { name: "apple-mobile-web-app-capable", content: "yes" });
+    add("meta", { name: "apple-mobile-web-app-title", content: "Grove" });
+  } catch (e) {}
+}
+
+// Public URLs for the store listings: grovehabits.app/#privacy and grovehabits.app/#terms
+export default function GroveApp() {
+  const readHash = () => { try { return window.location.hash.replace("#", ""); } catch (e) { return ""; } };
+  const [hash, setHash] = useState(readHash);
+  useEffect(() => {
+    addHeadTags();
+    const onHash = () => setHash(readHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const legalKind = LEGAL_DOCS[hash] ? hash : null;
+  const closeLegal = () => { try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) {} setHash(""); };
+  return (
+    <>
+      <div style={{ display: legalKind ? "none" : "block" }}><GroveAppMain /></div>
+      {legalKind && <LegalPage kind={legalKind} onBack={closeLegal} />}
     </>
   );
 }
