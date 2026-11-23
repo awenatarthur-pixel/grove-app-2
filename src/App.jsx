@@ -608,7 +608,7 @@ function HabitTracker({ state, actions }) {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <TopBar title="Your habits" right={
+      <TopBar title="Habits" right={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {state.guideStats && <GuideButton onClick={() => actions.openGuide("quests")} doneCount={state.guideStats.done} total={state.guideStats.total} claimable={state.guideStats.claimable} />}
           <PointsPill points={points} />
@@ -2412,6 +2412,7 @@ function StatsPage({ state, actions }) {
           </div>
         </Modal>
       )}
+      <ReminderCard />
     </div>
   );
 }
@@ -2975,6 +2976,51 @@ function AccountLegalCard({ authUser, hasStripeCustomer }) {
 }
 
 // Asks for an email sign-up BEFORE any pricing is shown, and once after someone's first couple of habits.
+// Daily habit reminder. Works in the iPhone/Android app (local notifications); on the website we say so honestly.
+function ReminderCard() {
+  const read = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+  const [on, setOn] = useState(() => read("grove_reminder_on", "0") === "1");
+  const [time, setTime] = useState(() => read("grove_reminder_time", "19:00"));
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    try { window.localStorage.setItem("grove_reminder_on", on ? "1" : "0"); window.localStorage.setItem("grove_reminder_time", time); } catch (e) {}
+    const LN = IS_STORE_APP && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (!LN) return;
+    (async () => {
+      try {
+        await LN.cancel({ notifications: [{ id: 1001 }] });
+        if (!on) { setNote(""); return; }
+        const perm = await LN.requestPermissions();
+        if (perm.display !== "granted") { setNote("Turn on notifications for Grove in your phone's Settings to get reminders."); setOn(false); return; }
+        const [h, m] = time.split(":").map(Number);
+        await LN.schedule({ notifications: [{ id: 1001, title: "Grove 🌱", body: "Time to tick off today's habits and keep your grove growing.", schedule: { on: { hour: h || 0, minute: m || 0 }, allowWhileIdle: true } }] });
+        setNote("");
+      } catch (e) { setNote("Couldn't set the reminder. Please try again."); }
+    })();
+  }, [on, time]);
+  const available = IS_STORE_APP;
+  return (
+    <div style={{ margin: "14px 20px 0", padding: "12px 14px", borderRadius: 14, background: "var(--parchment-50)", boxShadow: "var(--shadow-card)", fontFamily: "'Manrope', sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "var(--forest-900)" }}>🔔 Daily reminder</div>
+          <div style={{ fontSize: 12, color: "var(--bark-700)", marginTop: 2 }}>
+            {available ? "A gentle nudge to tick off your habits." : "Reminders arrive with the Grove iPhone app."}
+          </div>
+        </div>
+        <input type="checkbox" role="switch" aria-label="Daily reminder" checked={on} disabled={!available} onChange={e => setOn(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#153826" }} />
+      </div>
+      {available && on && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13, color: "var(--bark-900)" }}>
+          Remind me at
+          <input type="time" value={time} onChange={e => setTime(e.target.value || "19:00")} style={{ border: "1.5px solid var(--parchment-100)", borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 13 }} />
+        </div>
+      )}
+      {note && <div style={{ fontSize: 12, color: "var(--blush-500)", marginTop: 8 }}>{note}</div>}
+    </div>
+  );
+}
+
 // Website only: the app is free, but after a couple of habits you need to add an email to carry on.
 // Set REQUIRE_EMAIL_ON_WEB to false to make sign-up optional again. (Not used inside the iPhone app: Apple doesn't allow forced sign-up for features that work without an account.)
 const REQUIRE_EMAIL_ON_WEB = true;
@@ -3987,7 +4033,7 @@ function GroveAppMain() {
 
       {saveStatus && (
         <div style={{
-          position: "fixed", top: 14, left: 14, zIndex: 60, padding: "6px 11px", borderRadius: 999,
+          position: "fixed", bottom: 88, left: "50%", transform: "translateX(-50%)", zIndex: 60, padding: "6px 11px", borderRadius: 999,
           background: "rgba(21,56,38,0.85)", color: saveStatus === "error" ? "var(--blush-400)" : "var(--gold-500)",
           fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: 10,
           boxShadow: "var(--shadow-card)", pointerEvents: "none",
